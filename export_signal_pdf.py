@@ -63,16 +63,40 @@ class SqlCipherError(RuntimeError):
 
 
 def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connection:
-    """Open a Signal SQLite database and apply decryption key if provided."""
+    """Open a Signal SQLite database, trying plain SQLite first.
+
+    If the database is encrypted and the `pysqlcipher3` bindings are available,
+    SQLCipher is used and the decryption key from ``config_path`` (if provided)
+    is applied.  When the bindings are missing a :class:`SqlCipherError` is
+    raised with a helpful installation hint.
+    """
 
     if not os.path.isfile(db_path):
         fail(f"Database file not found: {db_path}")
     if check_readable(Path(db_path)):
         fail(f"Database file not readable: {db_path}. Check permissions.")
+
+    # First try to open the database using the standard sqlite3 module.  This
+    # works for unencrypted databases and avoids requiring SQLCipher when it is
+    # not needed.
+    try:
+        conn = sqlite3.connect(db_path)
+        # Execute a trivial query to ensure the file is a valid SQLite DB.
+        conn.execute("SELECT count(*) FROM sqlite_master;")
+        return conn
+    except sqlite3.DatabaseError:
+        # Likely an encrypted database; fall back to SQLCipher below.
+        try:
+            conn.close()
+        except Exception:
+            pass
+
     if sqlcipher is None:
         raise SqlCipherError(
-            "SQLCipher-enabled Python bindings (e.g., pysqlcipher3) are required"
+            "Database is likely encrypted or requires SQLCipher support. "
+            "Install SQLCipher-enabled Python bindings (e.g., pysqlcipher3)."
         )
+
     try:
         conn = sqlcipher.connect(db_path)
     except sqlcipher.DatabaseError as exc:
