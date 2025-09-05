@@ -15,6 +15,13 @@ python export_signal_pdf.py --db path/to/signal.db \
                             --output chat.pdf
 ```
 
+To obtain the hex-encoded key from ``config.json`` (useful for DB Browser's
+"Hex-Key" option) run:
+
+```
+python export_signal_pdf.py --config path/to/config.json --print-hex-key
+```
+
 The script relies on SQLCipher-enabled Python bindings such as
 [`pysqlcipher3`](https://pypi.org/project/pysqlcipher3/) or
 [`sqlcipher3`](https://pypi.org/project/sqlcipher3/) together with the
