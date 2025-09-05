@@ -105,6 +105,7 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
             "SQLCipher support is required to open this database."
         )
 
+    key_hex = None
     if config_path:
         if not os.path.isfile(config_path):
             fail(f"Config file not found: {config_path}")
@@ -141,10 +142,10 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
         conn.execute("SELECT count(*) FROM sqlite_master;")
     except sqlite3.DatabaseError as exc:
         conn.close()
-        if config_path:
+        if key_hex:
             fail(
-                "Database query failed after applying key; the key might be "
-                f"wrong or the database corrupted: {exc}"
+                "Database query failed after applying key "
+                f"{key_hex}; the key might be wrong or the database corrupted: {exc}"
             )
         fail(
             "Could not read database. It may be encrypted; provide the Signal "
