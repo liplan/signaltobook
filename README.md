@@ -24,8 +24,10 @@ with the key already encoded as hex.
 ## Interactive mode
 
 When run without command line arguments the script will prompt for the
-database path, the Signal `config.json` file, recipient and date range.
-These values are stored in `~/.signaltobook_config.json` and offered as
-defaults on subsequent runs. The output PDF name is derived from the
-selected date range (e.g. `chat_2020-12-01_2020-12-24.pdf`).
+database path and the Signal `config.json` file. It then reads all
+recipients from the database and lets you choose which conversation to
+export. After selecting the date range the values are stored in
+`~/.signaltobook_config.json` and offered as defaults on subsequent
+runs. The output PDF name is derived from the selected date range
+(e.g. `chat_2020-12-01_2020-12-24.pdf`).
 

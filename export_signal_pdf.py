@@ -27,36 +27,13 @@ import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fpdf import FPDF
 
 
-def export_chat(
-    db_path: str,
-    recipient: str,
-    start_date: str,
-    end_date: str,
-    output_pdf: str,
-    config_path: Optional[str] = None,
-) -> None:
-    """Export messages with ``recipient`` between ``start_date`` and ``end_date``.
-
-    Parameters
-    ----------
-    db_path: str
-        Path to the Signal SQLite database.
-    recipient: str
-        Phone number or unique identifier of the contact.
-    start_date: str
-        Start of the period (``YYYY-MM-DD``).
-    end_date: str
-        End of the period (``YYYY-MM-DD``).
-    output_pdf: str
-        Path to the generated PDF file.
-    config_path: Optional[str]
-        Path to the ``config.json`` containing the DB key.
-    """
+def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connection:
+    """Open a Signal SQLite database and apply decryption key if provided."""
 
     if not os.path.isfile(db_path):
         raise SystemExit(f"Database file not found: {db_path}")
@@ -88,6 +65,55 @@ def export_chat(
                     pass
         except (OSError, json.JSONDecodeError) as exc:
             print(f"Warning: Could not apply key from {config_path}: {exc}")
+    return conn
+
+
+def list_recipients(db_path: str, config_path: Optional[str] = None) -> List[str]:
+    """Return sorted list of recipients present in the Signal database."""
+
+    conn = open_db(db_path, config_path)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT DISTINCT address FROM messages WHERE address IS NOT NULL ORDER BY address;"
+        )
+    except sqlite3.DatabaseError as exc:
+        conn.close()
+        raise SystemExit(f"Could not read recipients from database: {exc}")
+    recipients = [row[0] for row in cur.fetchall()]
+    conn.close()
+    if not recipients:
+        raise SystemExit("No recipients found in the database.")
+    return recipients
+
+
+def export_chat(
+    db_path: str,
+    recipient: str,
+    start_date: str,
+    end_date: str,
+    output_pdf: str,
+    config_path: Optional[str] = None,
+) -> None:
+    """Export messages with ``recipient`` between ``start_date`` and ``end_date``.
+
+    Parameters
+    ----------
+    db_path: str
+        Path to the Signal SQLite database.
+    recipient: str
+        Phone number or unique identifier of the contact.
+    start_date: str
+        Start of the period (``YYYY-MM-DD``).
+    end_date: str
+        End of the period (``YYYY-MM-DD``).
+    output_pdf: str
+        Path to the generated PDF file.
+    config_path: Optional[str]
+        Path to the ``config.json`` containing the DB key.
+    """
+
+    conn = open_db(db_path, config_path)
     cur = conn.cursor()
 
     start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
@@ -180,7 +206,19 @@ if __name__ == "__main__":
         or cfg.get("config_path")
     )
 
-    recipient = args.recipient or input("Recipient identifier: ").strip()
+    if args.recipient:
+        recipient = args.recipient
+    else:
+        recipients = list_recipients(db_path, config_path)
+        print("Available recipients:")
+        for idx, addr in enumerate(recipients, 1):
+            print(f"{idx}: {addr}")
+        while True:
+            choice = input("Select recipient number: ").strip()
+            if choice.isdigit() and 1 <= int(choice) <= len(recipients):
+                recipient = recipients[int(choice) - 1]
+                break
+            print("Please enter a valid number.")
 
     if args.start and args.end:
         start_date, end_date = args.start, args.end
