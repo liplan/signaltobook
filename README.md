@@ -8,6 +8,7 @@ and filter the exported conversation by a date range.
 
 ```
 python export_signal_pdf.py --db path/to/signal.db \
+                            --config path/to/config.json \
                             --recipient "+4912345678" \
                             --start 2020-12-01 \
                             --end 2020-12-24 \
@@ -15,12 +16,14 @@ python export_signal_pdf.py --db path/to/signal.db \
 ```
 
 The script uses the standard `sqlite3` module and the `fpdf` package for
-PDF creation.
+PDF creation. If the database is encrypted, provide the accompanying
+`config.json` so the script can unlock it.
 
 ## Interactive mode
 
 When run without command line arguments the script will prompt for the
-database path, recipient and date range. The last used database path is
-stored in `~/.signaltobook_config.json` and offered as a default on
-subsequent runs.
+database path, the Signal `config.json` file, recipient and date range.
+These values are stored in `~/.signaltobook_config.json` and offered as
+defaults on subsequent runs. The output PDF name is derived from the
+selected date range (e.g. `chat_2020-12-01_2020-12-24.pdf`).
 
