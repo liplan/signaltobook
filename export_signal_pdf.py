@@ -21,9 +21,11 @@ query in this script targets the common tables `messages` and
 """
 
 import argparse
+import json
 import os
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 
 from fpdf import FPDF
 
@@ -95,15 +97,57 @@ def export_chat(db_path: str, recipient: str, start_date: str,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export Signal chat to PDF")
-    parser.add_argument("--db", required=True, help="Path to Signal SQLite DB")
-    parser.add_argument(
-        "--recipient", required=True, help="Phone number or contact identifier"
-    )
-    parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
-    parser.add_argument("--end", required=True, help="End date YYYY-MM-DD")
-    parser.add_argument(
-        "--output", default="chat.pdf", help="Path to the output PDF file"
-    )
+    parser.add_argument("--db", help="Path to Signal SQLite DB")
+    parser.add_argument("--recipient", help="Phone number or contact identifier")
+    parser.add_argument("--start", help="Start date YYYY-MM-DD")
+    parser.add_argument("--end", help="End date YYYY-MM-DD")
+    parser.add_argument("--output", help="Path to the output PDF file")
 
     args = parser.parse_args()
-    export_chat(args.db, args.recipient, args.start, args.end, args.output)
+
+    config_file = Path.home() / ".signaltobook_config.json"
+
+    def load_config():
+        try:
+            with open(config_file, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def save_config(cfg):
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_file, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh)
+
+    cfg = load_config()
+
+    db_path = (
+        args.db
+        or input(f"Path to Signal SQLite DB [{cfg.get('db_path', '')}]: ").strip()
+        or cfg.get("db_path")
+    )
+
+    recipient = args.recipient or input("Recipient identifier: ").strip()
+
+    if args.start and args.end:
+        start_date, end_date = args.start, args.end
+    else:
+        while True:
+            date_range = input("Date range (YYYY-MM-DD YYYY-MM-DD): ").split()
+            if len(date_range) == 2:
+                start_date, end_date = date_range
+                try:
+                    datetime.strptime(start_date, "%Y-%m-%d")
+                    datetime.strptime(end_date, "%Y-%m-%d")
+                    break
+                except ValueError:
+                    pass
+            print("Please provide valid dates separated by space.")
+
+    output_pdf = (
+        args.output or input("Output PDF filename [chat.pdf]: ").strip() or "chat.pdf"
+    )
+
+    save_config({**cfg, "db_path": db_path})
+
+    export_chat(db_path, recipient, start_date, end_date, output_pdf)
