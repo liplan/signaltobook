@@ -32,39 +32,48 @@ from typing import List, Optional
 from fpdf import FPDF
 
 
+def fail(message: str) -> None:
+    """Abort execution with an error message."""
+    raise SystemExit(message)
+
+
 def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connection:
     """Open a Signal SQLite database and apply decryption key if provided."""
 
     if not os.path.isfile(db_path):
-        raise SystemExit(f"Database file not found: {db_path}")
+        fail(f"Database file not found: {db_path}")
     try:
         conn = sqlite3.connect(db_path)
     except sqlite3.DatabaseError as exc:
-        raise SystemExit(f"Could not open SQLite database at {db_path}: {exc}")
+        fail(f"Could not open SQLite database at {db_path}: {exc}")
 
     if config_path:
+        if not os.path.isfile(config_path):
+            fail(f"Config file not found: {config_path}")
         try:
             with open(config_path, "r", encoding="utf-8") as fh:
                 cfg = json.load(fh)
-
-            key_hex = ""
-            key_b64 = cfg.get("key", "")
-            encrypted_key = cfg.get("encryptedKey", "")
-
-            if key_b64:
-                key_hex = base64.b64decode(key_b64).hex()
-            elif encrypted_key:
-                # "encryptedKey" in newer configs is already hex encoded
-                key_hex = encrypted_key
-
-            if key_hex:
-                conn.execute(f"PRAGMA key = \"x'{key_hex}'\";")
-                try:
-                    conn.execute("PRAGMA cipher_migrate;")
-                except sqlite3.DatabaseError:
-                    pass
         except (OSError, json.JSONDecodeError) as exc:
-            print(f"Warning: Could not apply key from {config_path}: {exc}")
+            fail(f"Could not read config {config_path}: {exc}")
+
+        key_b64 = cfg.get("key")
+        encrypted_key = cfg.get("encryptedKey")
+        if not key_b64 and not encrypted_key:
+            fail(
+                f"Config {config_path} missing 'key' or 'encryptedKey'"
+            )
+
+        if key_b64:
+            key_hex = base64.b64decode(key_b64).hex()
+        else:
+            # "encryptedKey" in newer configs is already hex encoded
+            key_hex = encrypted_key
+
+        conn.execute(f"PRAGMA key = \"x'{key_hex}'\";")
+        try:
+            conn.execute("PRAGMA cipher_migrate;")
+        except sqlite3.DatabaseError:
+            pass
     return conn
 
 
@@ -79,11 +88,11 @@ def list_recipients(db_path: str, config_path: Optional[str] = None) -> List[str
         )
     except sqlite3.DatabaseError as exc:
         conn.close()
-        raise SystemExit(f"Could not read recipients from database: {exc}")
+        fail(f"Could not read recipients from database: {exc}")
     recipients = [row[0] for row in cur.fetchall()]
     conn.close()
     if not recipients:
-        raise SystemExit("No recipients found in the database.")
+        fail("No recipients found in the database.")
     return recipients
 
 
@@ -134,7 +143,7 @@ def export_chat(
     try:
         cur.execute(query, (recipient, start_ts, end_ts))
     except sqlite3.DatabaseError as exc:
-        raise SystemExit(
+        fail(
             "Database query failed. Ensure the database is a valid Signal DB and "
             f"the recipient '{recipient}' exists. Original error: {exc}"
         )
