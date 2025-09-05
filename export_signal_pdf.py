@@ -64,6 +64,29 @@ class SqlCipherError(RuntimeError):
     """Raised when SQLCipher support is missing or inadequate."""
 
 
+def read_key_hex(config_path: str) -> str:
+    """Return the Signal database key from ``config_path`` as hex string."""
+
+    if not os.path.isfile(config_path):
+        fail(f"Config file not found: {config_path}")
+    if check_readable(Path(config_path)):
+        fail(f"Config file not readable: {config_path}. Check permissions.")
+    try:
+        with open(config_path, "r", encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"Could not read config {config_path}: {exc}")
+
+    key_b64 = cfg.get("key")
+    encrypted_key = cfg.get("encryptedKey")
+    if key_b64:
+        return base64.b64decode(key_b64).hex()
+    if encrypted_key:
+        # ``encryptedKey`` in newer configs is already hex encoded
+        return encrypted_key
+    fail(f"Config {config_path} missing 'key' or 'encryptedKey'")
+
+
 def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connection:
     """Open a Signal SQLite database using SQLCipher-enabled bindings.
 
@@ -107,29 +130,7 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
 
     key_hex = None
     if config_path:
-        if not os.path.isfile(config_path):
-            fail(f"Config file not found: {config_path}")
-        if check_readable(Path(config_path)):
-            fail(f"Config file not readable: {config_path}. Check permissions.")
-        try:
-            with open(config_path, "r", encoding="utf-8") as fh:
-                cfg = json.load(fh)
-        except (OSError, json.JSONDecodeError) as exc:
-            fail(f"Could not read config {config_path}: {exc}")
-
-        key_b64 = cfg.get("key")
-        encrypted_key = cfg.get("encryptedKey")
-        if not key_b64 and not encrypted_key:
-            fail(
-                f"Config {config_path} missing 'key' or 'encryptedKey'"
-            )
-
-        if key_b64:
-            key_hex = base64.b64decode(key_b64).hex()
-        else:
-            # "encryptedKey" in newer configs is already hex encoded
-            key_hex = encrypted_key
-
+        key_hex = read_key_hex(config_path)
         conn.execute(f"PRAGMA key = \"x'{key_hex}'\";")
         try:
             conn.execute("PRAGMA cipher_migrate;")
@@ -271,6 +272,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export Signal chat to PDF")
     parser.add_argument("--db", help="Path to Signal SQLite DB")
     parser.add_argument("--config", help="Path to Signal config.json with key")
+    parser.add_argument(
+        "--print-hex-key",
+        action="store_true",
+        help="Print hex key from config.json and exit",
+    )
     parser.add_argument("--recipient", help="Phone number or contact identifier")
     parser.add_argument("--start", help="Start date YYYY-MM-DD")
     parser.add_argument("--end", help="End date YYYY-MM-DD")
@@ -294,18 +300,24 @@ if __name__ == "__main__":
 
     cfg = load_config()
 
-    db_path = (
-        args.db
-        or input(f"Path to Signal SQLite DB [{cfg.get('db_path', '')}]: ").strip()
-        or cfg.get("db_path")
-    )
-
     config_path = (
         args.config
         or input(
             f"Path to Signal config.json [{cfg.get('config_path', '')}]: "
         ).strip()
         or cfg.get("config_path")
+    )
+
+    if args.print_hex_key:
+        if not config_path:
+            fail("Config path is required to print hex key")
+        print(read_key_hex(config_path))
+        raise SystemExit(0)
+
+    db_path = (
+        args.db
+        or input(f"Path to Signal SQLite DB [{cfg.get('db_path', '')}]: ").strip()
+        or cfg.get("db_path")
     )
 
     if args.recipient:
