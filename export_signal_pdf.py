@@ -29,6 +29,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+try:
+    from pysqlcipher3 import dbapi2 as sqlcipher
+except ImportError:
+    sqlcipher = None
+
 from fpdf import FPDF
 
 
@@ -53,6 +58,10 @@ def fail(message: str) -> None:
     raise SystemExit(message)
 
 
+class SqlCipherError(RuntimeError):
+    """Raised when SQLCipher support is missing or inadequate."""
+
+
 def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connection:
     """Open a Signal SQLite database and apply decryption key if provided."""
 
@@ -60,10 +69,27 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
         fail(f"Database file not found: {db_path}")
     if check_readable(Path(db_path)):
         fail(f"Database file not readable: {db_path}. Check permissions.")
+    if sqlcipher is None:
+        raise SqlCipherError(
+            "SQLCipher-enabled Python bindings (e.g., pysqlcipher3) are required"
+        )
     try:
-        conn = sqlite3.connect(db_path)
-    except sqlite3.DatabaseError as exc:
+        conn = sqlcipher.connect(db_path)
+    except sqlcipher.DatabaseError as exc:
         fail(f"Could not open SQLite database at {db_path}: {exc}")
+
+    try:
+        version_row = conn.execute("PRAGMA cipher_version;").fetchone()
+    except sqlcipher.DatabaseError as exc:
+        conn.close()
+        raise SqlCipherError(
+            "Installed SQLCipher bindings do not support PRAGMA cipher_version"
+        ) from exc
+    if not version_row or not version_row[0]:
+        conn.close()
+        raise SqlCipherError(
+            "SQLCipher support is required to open this database."
+        )
 
     if config_path:
         if not os.path.isfile(config_path):
@@ -92,7 +118,7 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
         conn.execute(f"PRAGMA key = \"x'{key_hex}'\";")
         try:
             conn.execute("PRAGMA cipher_migrate;")
-        except sqlite3.DatabaseError:
+        except sqlcipher.DatabaseError:
             pass
     return conn
 
@@ -100,13 +126,19 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
 def list_recipients(db_path: str, config_path: Optional[str] = None) -> List[str]:
     """Return sorted list of recipients present in the Signal database."""
 
-    conn = open_db(db_path, config_path)
+    try:
+        conn = open_db(db_path, config_path)
+    except SqlCipherError:
+        fail(
+            "Database is likely encrypted or requires SQLCipher support. "
+            "Install SQLCipher-enabled Python bindings (e.g., pysqlcipher3)."
+        )
     cur = conn.cursor()
     try:
         cur.execute(
             "SELECT DISTINCT address FROM messages WHERE address IS NOT NULL ORDER BY address;"
         )
-    except sqlite3.DatabaseError as exc:
+    except Exception as exc:
         conn.close()
         fail(f"Could not read recipients from database: {exc}")
     recipients = [row[0] for row in cur.fetchall()]
@@ -142,7 +174,10 @@ def export_chat(
         Path to the ``config.json`` containing the DB key.
     """
 
-    conn = open_db(db_path, config_path)
+    try:
+        conn = open_db(db_path, config_path)
+    except SqlCipherError as exc:
+        fail(str(exc))
     cur = conn.cursor()
 
     start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
