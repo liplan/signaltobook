@@ -1,0 +1,4 @@
+fpdf
+# For encrypted databases install one of:
+# pysqlcipher3
+# sqlcipher3

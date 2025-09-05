@@ -32,7 +32,10 @@ from typing import List, Optional
 try:
     from pysqlcipher3 import dbapi2 as sqlcipher
 except ImportError:
-    sqlcipher = None
+    try:
+        from sqlcipher3 import dbapi2 as sqlcipher
+    except ImportError:
+        sqlcipher = None
 
 from fpdf import FPDF
 
