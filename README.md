@@ -17,7 +17,9 @@ python export_signal_pdf.py --db path/to/signal.db \
 
 The script uses the standard `sqlite3` module and the `fpdf` package for
 PDF creation. If the database is encrypted, provide the accompanying
-`config.json` so the script can unlock it.
+`config.json` so the script can unlock it. The configuration file may
+either contain a base64 encoded `key` field or an `encryptedKey` field
+with the key already encoded as hex.
 
 ## Interactive mode
 

@@ -68,9 +68,19 @@ def export_chat(
     if config_path:
         try:
             with open(config_path, "r", encoding="utf-8") as fh:
-                key_b64 = json.load(fh).get("key", "")
+                cfg = json.load(fh)
+
+            key_hex = ""
+            key_b64 = cfg.get("key", "")
+            encrypted_key = cfg.get("encryptedKey", "")
+
             if key_b64:
                 key_hex = base64.b64decode(key_b64).hex()
+            elif encrypted_key:
+                # "encryptedKey" in newer configs is already hex encoded
+                key_hex = encrypted_key
+
+            if key_hex:
                 conn.execute(f"PRAGMA key = \"x'{key_hex}'\";")
                 try:
                     conn.execute("PRAGMA cipher_migrate;")
