@@ -32,6 +32,22 @@ from typing import List, Optional
 from fpdf import FPDF
 
 
+def check_readable(path: Path) -> List[Path]:
+    """Return a list of files under ``path`` that are not readable."""
+
+    path = path.resolve()
+    if path.is_file():
+        return [] if os.access(path, os.R_OK) else [path]
+
+    unreadable: List[Path] = []
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            fp = Path(root) / name
+            if not os.access(fp, os.R_OK):
+                unreadable.append(fp)
+    return unreadable
+
+
 def fail(message: str) -> None:
     """Abort execution with an error message."""
     raise SystemExit(message)
@@ -42,6 +58,8 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
 
     if not os.path.isfile(db_path):
         fail(f"Database file not found: {db_path}")
+    if check_readable(Path(db_path)):
+        fail(f"Database file not readable: {db_path}. Check permissions.")
     try:
         conn = sqlite3.connect(db_path)
     except sqlite3.DatabaseError as exc:
@@ -50,6 +68,8 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
     if config_path:
         if not os.path.isfile(config_path):
             fail(f"Config file not found: {config_path}")
+        if check_readable(Path(config_path)):
+            fail(f"Config file not readable: {config_path}. Check permissions.")
         try:
             with open(config_path, "r", encoding="utf-8") as fh:
                 cfg = json.load(fh)
@@ -153,6 +173,7 @@ def export_chat(
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     pdf.set_font("Arial", size=12)
+    missing_attachments: List[str] = []
 
     for date_ms, body, attachment_path, mime in rows:
         date_str = datetime.fromtimestamp(date_ms / 1000).strftime(
@@ -160,17 +181,23 @@ def export_chat(
         )
         text = body or ""
         pdf.multi_cell(0, 10, f"{date_str}: {text}")
-        if (
-            attachment_path
-            and mime
-            and mime.startswith("image")
-            and os.path.exists(attachment_path)
-        ):
-            pdf.image(attachment_path, w=100)
-            pdf.ln()
+        if attachment_path and mime and mime.startswith("image"):
+            if not os.path.exists(attachment_path):
+                missing_attachments.append(f"{attachment_path} (not found)")
+            elif check_readable(Path(attachment_path)):
+                missing_attachments.append(
+                    f"{attachment_path} (no read permission)"
+                )
+            else:
+                pdf.image(attachment_path, w=100)
+                pdf.ln()
         pdf.ln()
 
     pdf.output(output_pdf)
+    if missing_attachments:
+        print("⚠️ Some image attachments could not be embedded:")
+        for msg in missing_attachments:
+            print(f"   - {msg}")
     conn.close()
 
 
