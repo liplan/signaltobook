@@ -58,7 +58,12 @@ def export_chat(
         Path to the ``config.json`` containing the DB key.
     """
 
-    conn = sqlite3.connect(db_path)
+    if not os.path.isfile(db_path):
+        raise SystemExit(f"Database file not found: {db_path}")
+    try:
+        conn = sqlite3.connect(db_path)
+    except sqlite3.DatabaseError as exc:
+        raise SystemExit(f"Could not open SQLite database at {db_path}: {exc}")
 
     if config_path:
         try:
@@ -90,7 +95,13 @@ def export_chat(
         """
     )
 
-    cur.execute(query, (recipient, start_ts, end_ts))
+    try:
+        cur.execute(query, (recipient, start_ts, end_ts))
+    except sqlite3.DatabaseError as exc:
+        raise SystemExit(
+            "Database query failed. Ensure the database is a valid Signal DB and "
+            f"the recipient '{recipient}' exists. Original error: {exc}"
+        )
     rows = cur.fetchall()
 
     pdf = FPDF()
