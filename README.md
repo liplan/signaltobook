@@ -15,14 +15,14 @@ python export_signal_pdf.py --db path/to/signal.db \
                             --output chat.pdf
 ```
 
-The script uses the standard `sqlite3` module and the `fpdf` package for
-PDF creation. Unencrypted Signal databases work out of the box. If your
-database is encrypted you must install SQLCipher-enabled Python bindings
-such as [`pysqlcipher3`](https://pypi.org/project/pysqlcipher3/) or
-[`sqlcipher3`](https://pypi.org/project/sqlcipher3/) and provide the
-accompanying `config.json` so the script can unlock it. The
-configuration file may either contain a base64 encoded `key` field or an
-`encryptedKey` field with the key already encoded as hex.
+The script relies on SQLCipher-enabled Python bindings such as
+[`pysqlcipher3`](https://pypi.org/project/pysqlcipher3/) or
+[`sqlcipher3`](https://pypi.org/project/sqlcipher3/) together with the
+`fpdf` package for PDF creation. Unencrypted Signal databases can be
+opened directly, while encrypted ones require the accompanying
+`config.json` so the script can unlock them. The configuration file may
+either contain a base64 encoded `key` field or an `encryptedKey` field
+with the key already encoded as hex.
 
 ## Interactive mode
 
