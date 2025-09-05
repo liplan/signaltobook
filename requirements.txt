@@ -1,4 +1,3 @@
 fpdf
-# For encrypted databases install one of:
-# pysqlcipher3
-# sqlcipher3
+pysqlcipher3
+# Alternatively, install `sqlcipher3` if you prefer a different binding.

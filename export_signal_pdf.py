@@ -24,18 +24,17 @@ import argparse
 import base64
 import json
 import os
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
 try:
-    from pysqlcipher3 import dbapi2 as sqlcipher
-except ImportError:
+    from pysqlcipher3 import dbapi2 as sqlite3
+except ImportError:  # pragma: no cover - fallback only used when pysqlcipher3 missing
     try:
-        from sqlcipher3 import dbapi2 as sqlcipher
-    except ImportError:
-        sqlcipher = None
+        from sqlcipher3 import dbapi2 as sqlite3
+    except ImportError:  # pragma: no cover - handled in open_db
+        sqlite3 = None
 
 from fpdf import FPDF
 
@@ -66,12 +65,12 @@ class SqlCipherError(RuntimeError):
 
 
 def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connection:
-    """Open a Signal SQLite database, trying plain SQLite first.
+    """Open a Signal SQLite database using SQLCipher-enabled bindings.
 
-    If the database is encrypted and the `pysqlcipher3` bindings are available,
-    SQLCipher is used and the decryption key from ``config_path`` (if provided)
-    is applied.  When the bindings are missing a :class:`SqlCipherError` is
-    raised with a helpful installation hint.
+    The database is accessed via a SQLCipher driver such as ``pysqlcipher3``.
+    When ``config_path`` is provided the decryption key is applied to unlock
+    encrypted databases.  A :class:`SqlCipherError` is raised when suitable
+    bindings are missing.
     """
 
     if not os.path.isfile(db_path):
@@ -79,38 +78,26 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
     if check_readable(Path(db_path)):
         fail(f"Database file not readable: {db_path}. Check permissions.")
 
-    # First try to open the database using the standard sqlite3 module.  This
-    # works for unencrypted databases and avoids requiring SQLCipher when it is
-    # not needed.
-    try:
-        conn = sqlite3.connect(db_path)
-        # Execute a trivial query to ensure the file is a valid SQLite DB.
-        conn.execute("SELECT count(*) FROM sqlite_master;")
-        return conn
-    except sqlite3.DatabaseError:
-        # Likely an encrypted database; fall back to SQLCipher below.
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-    if sqlcipher is None:
+    if sqlite3 is None:
         raise SqlCipherError(
-            "Database is likely encrypted or requires SQLCipher support. "
-            "Install SQLCipher-enabled Python bindings (e.g., pysqlcipher3)."
+            "SQLCipher-enabled Python bindings are required. Install "
+            "pysqlcipher3 or sqlcipher3."
         )
 
     try:
-        conn = sqlcipher.connect(db_path)
-    except sqlcipher.DatabaseError as exc:
+        conn = sqlite3.connect(db_path)
+    except sqlite3.DatabaseError as exc:
         fail(f"Could not open SQLite database at {db_path}: {exc}")
 
+    # Ensure the driver actually speaks SQLCipher to avoid silently using the
+    # standard sqlite3 module when the dependency is missing.
     try:
         version_row = conn.execute("PRAGMA cipher_version;").fetchone()
-    except sqlcipher.DatabaseError as exc:
+    except sqlite3.DatabaseError as exc:
         conn.close()
         raise SqlCipherError(
-            "Installed SQLCipher bindings do not support PRAGMA cipher_version"
+            "Installed bindings do not support PRAGMA cipher_version; "
+            "ensure SQLCipher is available"
         ) from exc
     if not version_row or not version_row[0]:
         conn.close()
@@ -145,8 +132,24 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
         conn.execute(f"PRAGMA key = \"x'{key_hex}'\";")
         try:
             conn.execute("PRAGMA cipher_migrate;")
-        except sqlcipher.DatabaseError:
+        except sqlite3.DatabaseError:
             pass
+
+    # Validate access by running a trivial query. If the database is encrypted
+    # and no key was supplied this will raise a DatabaseError.
+    try:
+        conn.execute("SELECT count(*) FROM sqlite_master;")
+    except sqlite3.DatabaseError as exc:
+        conn.close()
+        if config_path:
+            fail(
+                "Database query failed after applying key; the key might be "
+                f"wrong or the database corrupted: {exc}"
+            )
+        fail(
+            "Could not read database. It may be encrypted; provide the Signal "
+            "config.json containing the key."
+        )
     return conn
 
 
