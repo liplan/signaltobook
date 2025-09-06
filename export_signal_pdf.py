@@ -25,7 +25,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Any
 
 try:
     from pysqlcipher3 import dbapi2 as sqlite3
@@ -229,6 +229,95 @@ def list_conversations(db_path: str, key_hex: str) -> List[Tuple[str, str]]:
     return rows
 
 
+def detect_message_schema(cur: Any) -> dict:
+    """Return table and column names for message data.
+
+    The schema across Signal versions varies.  This helper inspects all
+    available tables and picks the first one that provides the required
+    columns to retrieve conversation id, timestamp and message body.
+    """
+
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    tables = [row[0] for row in cur.fetchall()]
+
+    conv_cols = [
+        "conversationId",
+        "conversation_id",
+        "thread_id",
+        "threadId",
+        "recipient_id",
+        "recipientId",
+    ]
+    date_cols = [
+        "date",
+        "date_sent",
+        "timestamp",
+        "sent_at",
+        "created_at",
+        "received_at",
+    ]
+    body_cols = ["body", "message", "text", "content"]
+    id_cols = ["_id", "id"]
+
+    for table in tables:
+        try:
+            cur.execute(f"PRAGMA table_info('{table}')")
+        except sqlite3.DatabaseError:
+            continue
+        cols = {row[1] for row in cur.fetchall()}
+        conv_col = next((c for c in conv_cols if c in cols), None)
+        date_col = next((c for c in date_cols if c in cols), None)
+        body_col = next((c for c in body_cols if c in cols), None)
+        id_col = next((c for c in id_cols if c in cols), None)
+        if conv_col and date_col and body_col and id_col:
+            return {
+                "table": table,
+                "conv": conv_col,
+                "date": date_col,
+                "body": body_col,
+                "id": id_col,
+            }
+
+    fail("Could not detect messages table with expected columns.")
+
+
+def detect_attachment_schema(cur: Any, msg_id_col: str) -> Optional[dict]:
+    """Return attachment table information or ``None`` if not found."""
+
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    tables = [row[0] for row in cur.fetchall()]
+    candidates = [t for t in tables if "attach" in t]
+
+    path_cols = ["filePath", "fileName", "path", "filename"]
+    mime_cols = ["contentType", "mimetype", "mime_type", "type"]
+    fk_cols = [
+        "message_id",
+        "messageId",
+        "m_id",
+        "msg_id",
+        msg_id_col,
+    ]
+
+    for table in candidates:
+        try:
+            cur.execute(f"PRAGMA table_info('{table}')")
+        except sqlite3.DatabaseError:
+            continue
+        cols = {row[1] for row in cur.fetchall()}
+        fk_col = next((c for c in fk_cols if c in cols), None)
+        paths = [c for c in path_cols if c in cols]
+        if fk_col and paths:
+            mime_col = next((c for c in mime_cols if c in cols), None)
+            return {
+                "table": table,
+                "fk": fk_col,
+                "paths": paths,
+                "mime": mime_col,
+            }
+
+    return None
+
+
 def export_chat(
     db_path: str,
     conversation_id: str,
@@ -260,45 +349,44 @@ def export_chat(
     except SqlCipherError as exc:
         fail(str(exc))
     cur = conn.cursor()
+    schema = detect_message_schema(cur)
+    attachment = detect_attachment_schema(cur, schema["id"])
 
     start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
     end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
-    attachment_table = None
-    for candidate in ("attachments", "attachment", "message_attachments"):
-        try:
-            cur.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (candidate,),
-            )
-        except sqlite3.DatabaseError:
-            continue
-        if cur.fetchone():
-            attachment_table = candidate
-            break
 
-    if attachment_table:
+    if attachment:
+        path_expr = (
+            f"a.{attachment['paths'][0]}" if len(attachment["paths"]) == 1
+            else "COALESCE(" + ", ".join(f"a.{p}" for p in attachment["paths"]) + ")"
+        )
+        mime_expr = (
+            f"a.{attachment['mime']}" if attachment["mime"] else "NULL"
+        )
         query = f"""
-        SELECT m.date, m.body,
-               COALESCE(a.filePath, a.fileName, a.path) AS attachment_path,
-               a.contentType
-        FROM messages AS m
-        LEFT JOIN {attachment_table} AS a ON m._id = a.message_id
-        WHERE m.conversationId = ? AND m.date BETWEEN ? AND ?
-        ORDER BY m.date ASC;
+        SELECT m.{schema['date']} AS date,
+               m.{schema['body']} AS body,
+               {path_expr} AS attachment_path,
+               {mime_expr} AS contentType
+        FROM {schema['table']} AS m
+        LEFT JOIN {attachment['table']} AS a
+               ON m.{schema['id']} = a.{attachment['fk']}
+        WHERE m.{schema['conv']} = ? AND m.{schema['date']} BETWEEN ? AND ?
+        ORDER BY m.{schema['date']} ASC;
         """
     else:
         print(
-            "⚠️ No attachments table found (looked for 'attachments', 'attachment', "
-            "'message_attachments'). Proceeding without attachments."
+            "⚠️ No attachments table found (looked for names containing 'attach'). "
+            "Proceeding without attachments."
         )
-        print(
-            "   Adjust the SQL query in export_signal_pdf.py to match your Signal DB schema."
-        )
-        query = """
-        SELECT m.date, m.body, NULL AS attachment_path, NULL AS contentType
-        FROM messages AS m
-        WHERE m.conversationId = ? AND m.date BETWEEN ? AND ?
-        ORDER BY m.date ASC;
+        query = f"""
+        SELECT m.{schema['date']} AS date,
+               m.{schema['body']} AS body,
+               NULL AS attachment_path,
+               NULL AS contentType
+        FROM {schema['table']} AS m
+        WHERE m.{schema['conv']} = ? AND m.{schema['date']} BETWEEN ? AND ?
+        ORDER BY m.{schema['date']} ASC;
         """
 
     try:
