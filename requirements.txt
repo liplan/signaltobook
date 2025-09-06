@@ -2,3 +2,4 @@ fpdf2>=2.7
 Jinja2>=3.0
 pysqlcipher3
 # Alternatively, install `sqlcipher3` if you prefer a different binding.
+Pillow>=9.0
