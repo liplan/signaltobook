@@ -572,8 +572,24 @@ def export_chat(
             if check_readable(Path(resolved_path)):
                 missing_attachments.append(f"{resolved_path} (no read permission)")
             else:
-                pdf.image(resolved_path, w=100)
-                pdf.ln(line_height)
+                mime_main = mime.split(";")[0].lower()
+                mime_to_fpdf = {
+                    "image/jpeg": "JPEG",
+                    "image/jpg": "JPEG",
+                    "image/png": "PNG",
+                    "image/gif": "GIF",
+                }
+                kwargs = {"w": 100}
+                img_type = mime_to_fpdf.get(mime_main)
+                if img_type:
+                    kwargs["type"] = img_type
+                try:
+                    pdf.image(resolved_path, **kwargs)
+                    pdf.ln(line_height)
+                except RuntimeError:
+                    missing_attachments.append(
+                        f"{resolved_path} (unsupported image type)"
+                    )
         elif resolved_path:
             pdf.multi_cell(0, line_height, f"[Attachment: {Path(resolved_path).name}]")
         pdf.ln(message_spacing)
