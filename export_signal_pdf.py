@@ -45,6 +45,15 @@ SELF_LABEL = "You"
 
 CONFIG_FILE = Path.home() / ".signaltobook_config.json"
 
+# Common directories where Signal stores attachments across platforms
+ATTACHMENT_SEARCH_DIRS = [
+    Path.home() / ".config/Signal/attachments.noindex",
+    Path.home() / ".local/share/Signal/attachments.noindex",
+    Path.home() / ".local/share/signal-desktop/attachments.noindex",
+    Path.home() / "Library/Application Support/Signal/attachments.noindex",
+    Path.home() / "AppData/Roaming/Signal/attachments.noindex",
+]
+
 
 def load_config() -> dict:
     """Load persisted options from :data:`CONFIG_FILE`."""
@@ -115,6 +124,35 @@ def sanitize_text(text: str, pdf: FPDF) -> str:
     return "".join(
         ch if 0 <= ord(ch) <= max_codepoint else "?" for ch in text
     )
+
+
+def resolve_attachment_path(raw_path: Optional[str]) -> Optional[str]:
+    """Return an existing filesystem path for ``raw_path``.
+
+    Signal stores attachments in different base directories depending on the
+    platform and version.  The database may only hold a partial path or
+    filename.  This helper checks several common directories and returns the
+    first matching file or ``None`` when the attachment cannot be located.
+    """
+
+    if not raw_path:
+        return None
+
+    path = Path(raw_path)
+    candidates = [path]
+    # Also try just the filename in case only the hash is stored
+    candidates.append(Path(path.name))
+
+    for cand in candidates:
+        if cand.exists():
+            return str(cand)
+
+    for base in ATTACHMENT_SEARCH_DIRS:
+        for cand in candidates:
+            candidate = base / cand
+            if candidate.exists():
+                return str(candidate)
+    return None
 
 
 def is_outgoing(flag: Any) -> bool:
@@ -501,23 +539,40 @@ def export_chat(
         date_str = datetime.fromtimestamp(date_ms / 1000).strftime(
             "%Y-%m-%d %H:%M"
         )
-        if not body and not attachment_path:
+
+        resolved_path = (
+            resolve_attachment_path(attachment_path) if attachment_path else None
+        )
+
+        if resolved_path and mime and mime.startswith("text"):
+            try:
+                text_content = Path(resolved_path).read_text(
+                    encoding="utf-8", errors="replace"
+                )
+                body = (body + "\n" + text_content) if body else text_content
+            except OSError:
+                missing_attachments.append(f"{attachment_path} (read error)")
+            resolved_path = None
+        elif attachment_path and not resolved_path:
+            missing_attachments.append(f"{attachment_path} (not found)")
+
+        if not body and not resolved_path:
             body = "Nachricht wurde gelöscht"
+
         text = sanitize_text(body or "", pdf)
         sender = sanitize_text(
             SELF_LABEL if is_outgoing(sender_flag) else conversation_label, pdf
         )
         pdf.multi_cell(0, 10, f"{date_str} {sender}: {text}")
-        if attachment_path and mime and mime.startswith("image"):
-            if not os.path.exists(attachment_path):
-                missing_attachments.append(f"{attachment_path} (not found)")
-            elif check_readable(Path(attachment_path)):
-                missing_attachments.append(
-                    f"{attachment_path} (no read permission)"
-                )
+
+        if resolved_path and mime and mime.startswith("image"):
+            if check_readable(Path(resolved_path)):
+                missing_attachments.append(f"{resolved_path} (no read permission)")
             else:
-                pdf.image(attachment_path, w=100)
+                pdf.image(resolved_path, w=100)
                 pdf.ln()
+        elif resolved_path:
+            pdf.multi_cell(0, 10, f"[Attachment: {Path(resolved_path).name}]")
         pdf.ln()
 
     pdf.output(output_pdf)
