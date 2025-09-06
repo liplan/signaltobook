@@ -2,24 +2,17 @@
 <html>
 <head>
 <meta charset="utf-8">
-<style>
-body { font-family: DejaVuSans; font-size: 12px; }
-.message { margin-bottom: 6px; }
-.meta { color: #555555; font-size: 9px; }
-.sender { font-weight: bold; }
-.text { margin-left: 5px; }
-</style>
 </head>
-<body>
+<body style="font-family:DejaVu;font-size:12px">
 <h1>{{ conversation_label }}</h1>
 {% for msg in messages %}
-<div class="message">
-  <div class="meta">{{ msg.date }} <span class="sender">{{ msg.sender }}</span></div>
-  <div class="text">{{ msg.text }}</div>
+<div style="margin-bottom:6px">
+  <div style="color:#555555;font-size:9px">{{ msg.date }} <span style="font-weight:bold">{{ msg.sender }}</span></div>
+  <div style="margin-left:5px">{{ msg.text }}</div>
   {% if msg.attachment and msg.mime and msg.mime.startswith('image') %}
     <img src="{{ msg.attachment }}" width="100">
   {% elif msg.attachment %}
-    <div class="attachment">[Attachment: {{ msg.attachment_name }}]</div>
+    <div>[Attachment: {{ msg.attachment_name }}]</div>
   {% endif %}
 </div>
 {% endfor %}
