@@ -463,6 +463,8 @@ def export_chat(
         date_str = datetime.fromtimestamp(date_ms / 1000).strftime(
             "%Y-%m-%d %H:%M"
         )
+        if not body and not attachment_path:
+            body = "Nachricht wurde gelöscht"
         text = sanitize_text(body or "", pdf)
         pdf.multi_cell(0, 10, f"{date_str}: {text}")
         if attachment_path and mime and mime.startswith("image"):
