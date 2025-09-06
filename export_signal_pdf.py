@@ -38,6 +38,15 @@ except ImportError:  # pragma: no cover - fallback only used when pysqlcipher3 m
 from fpdf import FPDF, HTMLMixin
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+# Work around missing HTML2FPDF.unescape attribute in fpdf
+try:
+    from fpdf.html import HTML2FPDF  # type: ignore
+    from html import unescape as html_unescape
+    if not hasattr(HTML2FPDF, "unescape"):
+        HTML2FPDF.unescape = staticmethod(html_unescape)  # type: ignore[attr-defined]
+except Exception:  # pragma: no cover
+    pass
+
 
 class PDF(FPDF, HTMLMixin):
     """FPDF class extended with HTML rendering support."""
