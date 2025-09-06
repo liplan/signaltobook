@@ -23,6 +23,7 @@ query in this script targets the common tables `messages` and
 import argparse
 import json
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Optional, Any
@@ -37,6 +38,7 @@ except ImportError:  # pragma: no cover - fallback only used when pysqlcipher3 m
 
 from fpdf import FPDF, HTMLMixin
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from PIL import Image
 
 # Work around missing HTML2FPDF.unescape attribute in fpdf
 try:
@@ -48,9 +50,45 @@ except Exception:  # pragma: no cover
     pass
 
 
+def _normalize_image(path: str) -> str:
+    """Return a path to ``path`` converted to a PDF-compatible image.
+
+    Images in unsupported formats are converted to PNG and stored in a
+    temporary file.  Supported formats (PNG/JPEG) are returned unchanged.
+    """
+
+    try:
+        with Image.open(path) as img:
+            fmt = (img.format or "").upper()
+            if fmt not in {"PNG", "JPEG", "JPG"}:
+                tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                img.save(tmp.name, format="PNG")
+                return tmp.name
+    except Exception:
+        pass
+    return path
+
+
 class PDF(FPDF, HTMLMixin):
     """FPDF class extended with HTML rendering support."""
-    pass
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._tmp_images: List[str] = []
+
+    def image_map(self, src: str) -> str:  # type: ignore[override]
+        new_src = _normalize_image(src)
+        if new_src != src:
+            self._tmp_images.append(new_src)
+        return new_src
+
+    def cleanup(self) -> None:
+        for fp in self._tmp_images:
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+        self._tmp_images.clear()
 
 
 DB_KEY_HEX = "3e3d116a3066b05ccb893a2abefd93a6c6700ff4dbe25e17137edcd7ac7e7ef9"
@@ -602,6 +640,7 @@ def export_chat(
     html = template.render(conversation_label=conversation_label, messages=messages)
     pdf.write_html(html)
     pdf.output(output_pdf)
+    pdf.cleanup()
 
     if missing_attachments:
         print("⚠️ Some image attachments could not be embedded:")
