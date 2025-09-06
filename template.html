@@ -5,6 +5,7 @@
 <style>
 body { font-family: DejaVuSans; font-size: 12px; }
 .message { margin-bottom: 6px; }
+.date { font-size: 6px; color: #888888; }
 .meta { color: #555555; font-size: 9px; }
 .sender { font-weight: bold; }
 .text { margin-left: 5px; }
@@ -14,7 +15,7 @@ body { font-family: DejaVuSans; font-size: 12px; }
 <h1>{{ conversation_label }}</h1>
 {% for msg in messages %}
 <div class="message">
-  <div class="meta">{{ msg.date }} <span class="sender">{{ msg.sender }}</span></div>
+  <div class="meta date">{{ msg.date }} <span class="sender">{{ msg.sender }}</span></div>
   <div class="text">{{ msg.text }}</div>
   {% if msg.attachment and msg.mime and msg.mime.startswith('image') %}
     <img src="{{ msg.attachment }}" width="100">
