@@ -140,21 +140,47 @@ def rewrite_img_srcs_in_html(html: str) -> str:
     return _IMG_TAG_RE.sub(repl, html)
 
 
-def inline_css(html: str) -> str:
-    """Convert simple CSS rules to inline styles and strip the style block.
+def inline_css(html: str, base_path: Optional[Path] = None) -> str:
+    """Convert simple CSS rules to inline styles and strip stylesheet definitions.
 
-    Only very basic selectors are supported: ``body`` and single-class selectors
-    like ``.message``. The resulting string contains only the body content so
-    that style definitions are not rendered as text in the PDF.
+    ``base_path`` specifies where linked stylesheets are located. Only very
+    basic selectors are supported: ``body`` and single-class selectors like
+    ``.message``. The resulting string contains only the body content so that
+    style definitions are not rendered as text in the PDF.
     """
 
-    style_match = re.search(r"<style[^>]*>(.*?)</style>", html, re.DOTALL | re.IGNORECASE)
+    css_blocks: List[str] = []
+
+    # Extract embedded ``<style>`` blocks
+    for style_match in re.findall(
+        r"<style[^>]*>(.*?)</style>", html, re.DOTALL | re.IGNORECASE
+    ):
+        css_blocks.append(style_match)
+    html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
+
+    # Resolve linked stylesheets
+    if base_path is not None:
+        for href in re.findall(
+            r"<link[^>]+rel=['\"]stylesheet['\"][^>]+href=['\"]([^'\"]+)['\"][^>]*>",
+            html,
+            flags=re.IGNORECASE,
+        ):
+            css_file = (base_path / href).resolve()
+            try:
+                css_blocks.append(css_file.read_text())
+            except OSError:
+                pass
+        html = re.sub(
+            r"<link[^>]+rel=['\"]stylesheet['\"][^>]*>",
+            "",
+            html,
+            flags=re.IGNORECASE,
+        )
+
+    css = "\n".join(css_blocks)
     rules = {}
-    if style_match:
-        css = style_match.group(1)
-        for selector, props in re.findall(r"([^{}]+)\{([^{}]+)\}", css):
-            rules[selector.strip()] = props.strip().rstrip(";")
-        html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    for selector, props in re.findall(r"([^{}]+)\{([^{}]+)\}", css):
+        rules[selector.strip()] = props.strip().rstrip(";")
 
     if "body" in rules:
         body_props = rules["body"]
@@ -737,7 +763,7 @@ def export_chat(
     template = env.get_template(template_file.name)
     conversation_label = sanitize_text(conversation_label, pdf)
     html = template.render(conversation_label=conversation_label, messages=messages)
-    html = inline_css(html)
+    html = inline_css(html, template_file.parent)
     html = rewrite_img_srcs_in_html(html)
     pdf._tmp_images.extend(_REWRITE_TMP_IMAGES)
     pdf.write_html(html)
