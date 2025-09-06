@@ -53,17 +53,29 @@ except Exception:  # pragma: no cover
 def _normalize_image(path: str) -> str:
     """Return a path to ``path`` converted to a PDF-compatible image.
 
-    Images in unsupported formats are converted to PNG and stored in a
-    temporary file.  Supported formats (PNG/JPEG) are returned unchanged.
+    FPDF relies on filename extensions to detect image types.  Signal stores
+    some attachments without an extension, which previously triggered
+    ``Unsupported image type`` errors.  Images in unsupported formats or
+    without a recognised extension are converted to a temporary PNG/JPEG file
+    to ensure compatibility.  Supported formats with proper extensions are
+    returned unchanged.
     """
 
     try:
         with Image.open(path) as img:
             fmt = (img.format or "").upper()
-            if fmt not in {"PNG", "JPEG", "JPG"}:
-                tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-                img.save(tmp.name, format="PNG")
-                return tmp.name
+            ext = Path(path).suffix.lower()
+            # Accept common formats only when they already have a proper
+            # extension.  Otherwise convert to a temp file with one.
+            if fmt in {"PNG", "JPEG", "JPG"} and ext in {".png", ".jpg", ".jpeg"}:
+                return path
+
+            suffix = ".jpg" if fmt in {"JPEG", "JPG"} else ".png"
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            # Save as JPEG only when the original format is JPEG, otherwise use PNG
+            out_fmt = "JPEG" if suffix == ".jpg" else "PNG"
+            img.save(tmp.name, format=out_fmt)
+            return tmp.name
     except Exception:
         pass
     return path
