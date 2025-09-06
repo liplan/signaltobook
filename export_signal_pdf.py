@@ -140,6 +140,57 @@ def rewrite_img_srcs_in_html(html: str) -> str:
     return _IMG_TAG_RE.sub(repl, html)
 
 
+def inline_css(html: str) -> str:
+    """Convert simple CSS rules to inline styles and strip the style block.
+
+    Only very basic selectors are supported: ``body`` and single-class selectors
+    like ``.message``. The resulting string contains only the body content so
+    that style definitions are not rendered as text in the PDF.
+    """
+
+    style_match = re.search(r"<style[^>]*>(.*?)</style>", html, re.DOTALL | re.IGNORECASE)
+    rules = {}
+    if style_match:
+        css = style_match.group(1)
+        for selector, props in re.findall(r"([^{}]+)\{([^{}]+)\}", css):
+            rules[selector.strip()] = props.strip().rstrip(";")
+        html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
+
+    if "body" in rules:
+        body_props = rules["body"]
+        html = re.sub(
+            r"<body([^>]*)>",
+            lambda m: f"<body{m.group(1)} style=\"{body_props}\">",
+            html,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+    for selector, props in rules.items():
+        if not selector.startswith("."):
+            continue
+        cls = selector[1:]
+        pattern = re.compile(
+            rf'(<[^>]*class=\"[^\"]*\\b{cls}\\b[^\"]*\"[^>]*>)',
+            re.IGNORECASE,
+        )
+
+        def repl(match: re.Match) -> str:
+            tag = match.group(1)
+            if 'style="' in tag:
+                return re.sub(
+                    r'style=\"([^\"]*)\"',
+                    lambda s: f'style=\"{s.group(1)} {props}\"',
+                    tag,
+                )
+            return tag[:-1] + f' style="{props}">'
+
+        html = pattern.sub(repl, html)
+
+    body_match = re.search(r"<body[^>]*>(.*)</body>", html, re.DOTALL | re.IGNORECASE)
+    return body_match.group(1) if body_match else html
+
+
 DB_KEY_HEX = "3e3d116a3066b05ccb893a2abefd93a6c6700ff4dbe25e17137edcd7ac7e7ef9"
 
 # Label used for messages sent by the user
@@ -627,10 +678,10 @@ def export_chat(
     pdf = PDF()
     font_path = Path(__file__).parent / "dejavu-sans" / "DejaVuSans.ttf"
     ensure_font(font_path)
-    pdf.add_font("DejaVu", "", str(font_path), uni=True)
+    pdf.add_font("DejaVuSans", "", str(font_path), uni=True)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-    pdf.set_font("DejaVu", size=12)
+    pdf.set_font("DejaVuSans", size=12)
 
     missing_attachments: List[str] = []
     messages: List[dict] = []
@@ -686,6 +737,7 @@ def export_chat(
     template = env.get_template(template_file.name)
     conversation_label = sanitize_text(conversation_label, pdf)
     html = template.render(conversation_label=conversation_label, messages=messages)
+    html = inline_css(html)
     html = rewrite_img_srcs_in_html(html)
     pdf._tmp_images.extend(_REWRITE_TMP_IMAGES)
     pdf.write_html(html)
