@@ -263,18 +263,43 @@ def export_chat(
 
     start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
     end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
+    attachment_table = None
+    for candidate in ("attachments", "attachment", "message_attachments"):
+        try:
+            cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (candidate,),
+            )
+        except sqlite3.DatabaseError:
+            continue
+        if cur.fetchone():
+            attachment_table = candidate
+            break
 
-    query = (
-        """
+    if attachment_table:
+        query = f"""
         SELECT m.date, m.body,
                COALESCE(a.filePath, a.fileName, a.path) AS attachment_path,
                a.contentType
         FROM messages AS m
-        LEFT JOIN attachments AS a ON m._id = a.message_id
+        LEFT JOIN {attachment_table} AS a ON m._id = a.message_id
         WHERE m.conversationId = ? AND m.date BETWEEN ? AND ?
         ORDER BY m.date ASC;
         """
-    )
+    else:
+        print(
+            "⚠️ No attachments table found (looked for 'attachments', 'attachment', "
+            "'message_attachments'). Proceeding without attachments."
+        )
+        print(
+            "   Adjust the SQL query in export_signal_pdf.py to match your Signal DB schema."
+        )
+        query = """
+        SELECT m.date, m.body, NULL AS attachment_path, NULL AS contentType
+        FROM messages AS m
+        WHERE m.conversationId = ? AND m.date BETWEEN ? AND ?
+        ORDER BY m.date ASC;
+        """
 
     try:
         cur.execute(query, (conversation_id, start_ts, end_ts))
