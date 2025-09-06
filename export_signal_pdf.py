@@ -39,6 +39,7 @@ except ImportError:  # pragma: no cover - fallback only used when pysqlcipher3 m
 
 from fpdf import FPDF, HTMLMixin
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup
 from PIL import Image
 
 try:  # optional HEIF support
@@ -658,7 +659,7 @@ def export_chat(
         if not body and not resolved_path:
             body = "Nachricht wurde gelöscht"
 
-        text = sanitize_text(body or "", pdf)
+        text = Markup(sanitize_text(body or "", pdf).replace("\n", "<br>"))
         sender = sanitize_text(
             SELF_LABEL if is_outgoing(sender_flag) else conversation_label, pdf
         )
