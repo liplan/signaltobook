@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Export Signal messages with a single contact to a PDF file.
+Export Signal messages from a single conversation to a PDF file.
 
 The script expects a Signal SQLite database (e.g. the `signal.db` from
-Signal Desktop or Android).  It exports all messages exchanged with a
-specific contact and optionally embeds image attachments.  Messages are
+Signal Desktop or Android).  It exports all messages exchanged within a
+specific conversation and optionally embeds image attachments.  Messages are
 filtered by a date range, for example from 1 December 2020 to
 24 December 2020.
 
 Usage:
     python export_signal_pdf.py --db path/to/signal.db \
-                                --recipient "+4912345678" \
+                                --conversation 1 \
                                 --start 2020-12-01 \
                                 --end 2020-12-24 \
                                 --output chat.pdf
@@ -145,8 +145,8 @@ def confirm_db_connection(db_path: str, key_hex: str) -> None:
     input("Press Enter to continue...")
 
 
-def list_recipients(db_path: str, key_hex: str) -> List[str]:
-    """Return sorted list of recipients present in the Signal database."""
+def list_conversations(db_path: str, key_hex: str) -> List[str]:
+    """Return sorted list of conversation identifiers from the database."""
 
     try:
         conn = open_db(db_path, key_hex)
@@ -156,36 +156,45 @@ def list_recipients(db_path: str, key_hex: str) -> List[str]:
             "Install SQLCipher-enabled Python bindings (e.g., pysqlcipher3)."
         )
     cur = conn.cursor()
+
+    # Try to read the conversation identifiers. The primary key column can
+    # vary between Signal versions (``id`` or ``_id``). We query whichever is
+    # available. Only the identifier is returned to avoid exposing phone
+    # numbers or other personal data.
+    query = "SELECT id FROM conversations ORDER BY id;"
     try:
-        cur.execute(
-            "SELECT DISTINCT address FROM messages WHERE address IS NOT NULL ORDER BY address;"
-        )
-    except Exception as exc:
-        conn.close()
-        fail(f"Could not read recipients from database: {exc}")
-    recipients = [row[0] for row in cur.fetchall()]
+        cur.execute(query)
+    except sqlite3.DatabaseError:
+        query = "SELECT _id FROM conversations ORDER BY _id;"
+        try:
+            cur.execute(query)
+        except sqlite3.DatabaseError as exc:
+            conn.close()
+            fail(f"Could not read conversations from database: {exc}")
+
+    conversations = [str(row[0]) for row in cur.fetchall()]
     conn.close()
-    if not recipients:
-        fail("No recipients found in the database.")
-    return recipients
+    if not conversations:
+        fail("No conversations found in the database.")
+    return conversations
 
 
 def export_chat(
     db_path: str,
-    recipient: str,
+    conversation_id: str,
     start_date: str,
     end_date: str,
     output_pdf: str,
     key_hex: str,
 ) -> None:
-    """Export messages with ``recipient`` between ``start_date`` and ``end_date``.
+    """Export messages from ``conversation_id`` between ``start_date`` and ``end_date``.
 
     Parameters
     ----------
     db_path: str
         Path to the Signal SQLite database.
-    recipient: str
-        Phone number or unique identifier of the contact.
+    conversation_id: str
+        Identifier of the conversation selected from the ``conversations`` table.
     start_date: str
         Start of the period (``YYYY-MM-DD``).
     end_date: str
@@ -212,17 +221,17 @@ def export_chat(
                a.contentType
         FROM messages AS m
         LEFT JOIN attachments AS a ON m._id = a.message_id
-        WHERE m.address = ? AND m.date BETWEEN ? AND ?
+        WHERE m.conversationId = ? AND m.date BETWEEN ? AND ?
         ORDER BY m.date ASC;
         """
     )
 
     try:
-        cur.execute(query, (recipient, start_ts, end_ts))
+        cur.execute(query, (conversation_id, start_ts, end_ts))
     except sqlite3.DatabaseError as exc:
         fail(
             "Database query failed. Ensure the database is a valid Signal DB and "
-            f"the recipient '{recipient}' exists. Original error: {exc}"
+            f"the conversation id '{conversation_id}' exists. Original error: {exc}"
         )
     rows = cur.fetchall()
 
@@ -261,7 +270,10 @@ def export_chat(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export Signal chat to PDF")
     parser.add_argument("--db", help="Path to Signal SQLite DB")
-    parser.add_argument("--recipient", help="Phone number or contact identifier")
+    parser.add_argument(
+        "--conversation",
+        help="Conversation identifier as listed in the 'conversations' table",
+    )
     parser.add_argument("--start", help="Start date YYYY-MM-DD")
     parser.add_argument("--end", help="End date YYYY-MM-DD")
     parser.add_argument("--output", help="Path to the output PDF file")
@@ -271,17 +283,17 @@ if __name__ == "__main__":
     db_path = args.db or input("Path to Signal SQLite DB: ").strip()
     confirm_db_connection(db_path, DB_KEY_HEX)
 
-    if args.recipient:
-        recipient = args.recipient
+    if args.conversation:
+        conversation_id = args.conversation
     else:
-        recipients = list_recipients(db_path, DB_KEY_HEX)
-        print("Available recipients:")
-        for idx, addr in enumerate(recipients, 1):
-            print(f"{idx}: {addr}")
+        conversations = list_conversations(db_path, DB_KEY_HEX)
+        print("Available conversations:")
+        for idx, cid in enumerate(conversations, 1):
+            print(f"{idx}: {cid}")
         while True:
-            choice = input("Select recipient number: ").strip()
-            if choice.isdigit() and 1 <= int(choice) <= len(recipients):
-                recipient = recipients[int(choice) - 1]
+            choice = input("Select conversation number: ").strip()
+            if choice.isdigit() and 1 <= int(choice) <= len(conversations):
+                conversation_id = conversations[int(choice) - 1]
                 break
             print("Please enter a valid number.")
 
@@ -310,7 +322,7 @@ if __name__ == "__main__":
 
     export_chat(
         db_path,
-        recipient,
+        conversation_id,
         start_date,
         end_date,
         output_pdf,
