@@ -2,13 +2,21 @@
 <html>
 <head>
 <meta charset="utf-8">
+<style>
+body { font-family: DejaVuSans; font-size: 12px; }
+.message { margin-bottom: 6px; }
+.date { font-size: 6px; color: #888888; }
+.meta { color: #555555; font-size: 9px; }
+.sender { font-weight: bold; }
+.text { margin-left: 5px; }
+</style>
 </head>
-<body style="font-family:DejaVu;font-size:12px">
+<body>
 <h1>{{ conversation_label }}</h1>
 {% for msg in messages %}
-<div style="margin-bottom:6px">
-  <div style="color:#555555;font-size:9px">{{ msg.date }} <span style="font-weight:bold">{{ msg.sender }}</span></div>
-  <div style="margin-left:5px">{{ msg.text | replace('\n', '<br>') | safe }}</div>
+<div class="message">
+  <div class="meta"><span class="date">{{ msg.date }}</span> <span class="sender">{{ msg.sender }}</span></div>
+  <div class="text">{{ msg.text | replace('\n', '<br>') | safe }}</div>
   {% if msg.attachment and msg.mime and msg.mime.startswith('image') %}
     <img src="{{ msg.attachment }}" width="100">
   {% elif msg.attachment %}
