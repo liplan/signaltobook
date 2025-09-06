@@ -25,6 +25,14 @@ key to access their contents. To render Unicode characters the script
 uses the `DejaVuSans` TrueType font bundled in the repository under
 `dejavu-sans/DejaVuSans.ttf`.
 
+## Styling with templates
+
+The PDF layout can be customized using an HTML template rendered via
+`Jinja2` and converted to PDF with `fpdf2`'s HTML capabilities. Edit the
+provided `template.html` or supply your own template file using the
+`--template` command-line option to adjust fonts, colors, or other layout
+details.
+
 If the `encryptedKey` is itself encrypted, a dedicated tool may be
 required to obtain the usable key. One approach is to compile and run a
 community Rust utility (available on GitHub) which produces a decrypted
