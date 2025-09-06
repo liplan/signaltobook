@@ -533,6 +533,9 @@ def export_chat(
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     pdf.set_font("DejaVu", size=12)
+    # Smaller line height and spacing between messages
+    line_height = 6
+    message_spacing = 3
     missing_attachments: List[str] = []
 
     for date_ms, body, attachment_path, mime, sender_flag in rows:
@@ -563,17 +566,17 @@ def export_chat(
         sender = sanitize_text(
             SELF_LABEL if is_outgoing(sender_flag) else conversation_label, pdf
         )
-        pdf.multi_cell(0, 10, f"{date_str} {sender}: {text}")
+        pdf.multi_cell(0, line_height, f"{date_str} {sender}: {text}")
 
         if resolved_path and mime and mime.startswith("image"):
             if check_readable(Path(resolved_path)):
                 missing_attachments.append(f"{resolved_path} (no read permission)")
             else:
                 pdf.image(resolved_path, w=100)
-                pdf.ln()
+                pdf.ln(line_height)
         elif resolved_path:
-            pdf.multi_cell(0, 10, f"[Attachment: {Path(resolved_path).name}]")
-        pdf.ln()
+            pdf.multi_cell(0, line_height, f"[Attachment: {Path(resolved_path).name}]")
+        pdf.ln(message_spacing)
 
     pdf.output(output_pdf)
     if missing_attachments:
