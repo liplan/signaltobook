@@ -122,7 +122,8 @@ def sanitize_filename(text: str) -> str:
 
     normalized = unicodedata.normalize("NFKD", text)
     ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^A-Za-z0-9]+", "_", ascii_text).strip("_") or "chat"
+    sanitized = re.sub(r"[^A-Za-z0-9]+", "", ascii_text)
+    return sanitized or "chat"
 
 
 class SqlCipherError(RuntimeError):
