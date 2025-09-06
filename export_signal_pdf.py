@@ -628,7 +628,8 @@ def export_chat(
         )
         return False
 
-    pdf = PDF()
+    # Use UTF-8 encoding to ensure non-Latin characters are handled correctly
+    pdf = PDF(encoding="utf-8")
     font_path = Path(__file__).parent / "dejavu-sans" / "DejaVuSans.ttf"
     ensure_font(font_path)
     pdf.add_font("DejaVu", "", str(font_path), uni=True)
