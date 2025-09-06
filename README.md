@@ -9,7 +9,7 @@ and filter the exported conversation by a date range.
 ```
 python export_signal_pdf.py --db path/to/signal.db \
                             --config path/to/config.json \
-                            --recipient "+4912345678" \
+                            --conversation 1 \
                             --start 2020-12-01 \
                             --end 2020-12-24 \
                             --output chat.pdf
@@ -35,9 +35,9 @@ with the key already encoded as hex.
 
 When run without command line arguments the script will prompt for the
 database path and the Signal `config.json` file. It then reads all
-recipients from the database and lets you choose which conversation to
-export. After selecting the date range the values are stored in
-`~/.signaltobook_config.json` and offered as defaults on subsequent
-runs. The output PDF name is derived from the selected date range
+conversation identifiers from the database and lets you choose which
+conversation to export. After selecting the date range the values are
+stored in `~/.signaltobook_config.json` and offered as defaults on
+subsequent runs. The output PDF name is derived from the selected date range
 (e.g. `chat_2020-12-01_2020-12-24.pdf`).
 
