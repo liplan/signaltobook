@@ -668,6 +668,9 @@ def export_chat(
         sender = sanitize_text(
             SELF_LABEL if is_outgoing(sender_flag) else conversation_label, pdf
         )
+        attachment_name = (
+            sanitize_text(Path(resolved_path).name, pdf) if resolved_path else None
+        )
 
         messages.append(
             {
@@ -675,7 +678,7 @@ def export_chat(
                 "sender": sender,
                 "text": text,
                 "attachment": resolved_path,
-                "attachment_name": Path(resolved_path).name if resolved_path else None,
+                "attachment_name": attachment_name,
                 "mime": mime,
             }
         )
@@ -686,6 +689,7 @@ def export_chat(
         autoescape=select_autoescape(["html", "xml"]),
     )
     template = env.get_template(template_file.name)
+    conversation_label = sanitize_text(conversation_label, pdf)
     html = template.render(conversation_label=conversation_label, messages=messages)
     html = rewrite_img_srcs_in_html(html)
     pdf._tmp_images.extend(_REWRITE_TMP_IMAGES)
