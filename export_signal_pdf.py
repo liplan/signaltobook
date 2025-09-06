@@ -26,6 +26,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Optional, Any
+from urllib.parse import urlparse, unquote
 
 try:
     from pysqlcipher3 import dbapi2 as sqlite3
@@ -114,6 +115,22 @@ def sanitize_text(text: str, pdf: FPDF) -> str:
         ch if 0 <= ord(ch) <= max_codepoint else "?" for ch in text
     )
 
+
+def resolve_attachment_path(raw_path: str, db_path: str) -> Path:
+    """Resolve attachment path to an accessible filesystem location.
+
+    Attachment paths stored in the database may be ``file://`` URIs or
+    relative paths. This helper normalises those values by stripping any
+    URI scheme and resolving relative paths against the directory
+    containing ``db_path``.
+    """
+
+    if raw_path.startswith("file://"):
+        raw_path = urlparse(raw_path).path
+    path = Path(unquote(raw_path))
+    if not path.is_absolute():
+        path = Path(db_path).resolve().parent / path
+    return path
 
 class SqlCipherError(RuntimeError):
     """Raised when SQLCipher support is missing or inadequate."""
@@ -466,14 +483,13 @@ def export_chat(
         text = sanitize_text(body or "", pdf)
         pdf.multi_cell(0, 10, f"{date_str}: {text}")
         if attachment_path and mime and mime.startswith("image"):
-            if not os.path.exists(attachment_path):
-                missing_attachments.append(f"{attachment_path} (not found)")
-            elif check_readable(Path(attachment_path)):
-                missing_attachments.append(
-                    f"{attachment_path} (no read permission)"
-                )
+            img_path = resolve_attachment_path(str(attachment_path), db_path)
+            if not img_path.exists():
+                missing_attachments.append(f"{img_path} (not found)")
+            elif check_readable(img_path):
+                missing_attachments.append(f"{img_path} (no read permission)")
             else:
-                pdf.image(attachment_path, w=100)
+                pdf.image(str(img_path), w=100)
                 pdf.ln()
         pdf.ln()
 
