@@ -103,6 +103,17 @@ def ensure_font(font_path: Path) -> None:
         "font files are available."
     )
 
+def sanitize_text(text: str, pdf: FPDF) -> str:
+    """Return ``text`` stripped of characters unsupported by ``pdf``'s font."""
+
+    font = pdf.current_font
+    if not font:
+        return text
+    max_codepoint = font.get("maxUni", len(font.get("cw", [])) - 1)
+    return "".join(
+        ch if 0 <= ord(ch) <= max_codepoint else "?" for ch in text
+    )
+
 
 class SqlCipherError(RuntimeError):
     """Raised when SQLCipher support is missing or inadequate."""
@@ -452,7 +463,7 @@ def export_chat(
         date_str = datetime.fromtimestamp(date_ms / 1000).strftime(
             "%Y-%m-%d %H:%M"
         )
-        text = body or ""
+        text = sanitize_text(body or "", pdf)
         pdf.multi_cell(0, 10, f"{date_str}: {text}")
         if attachment_path and mime and mime.startswith("image"):
             if not os.path.exists(attachment_path):
