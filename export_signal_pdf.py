@@ -21,12 +21,10 @@ query in this script targets the common tables `messages` and
 """
 
 import argparse
-import base64
-import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 try:
     from pysqlcipher3 import dbapi2 as sqlite3
@@ -37,6 +35,9 @@ except ImportError:  # pragma: no cover - fallback only used when pysqlcipher3 m
         sqlite3 = None
 
 from fpdf import FPDF
+
+
+DB_KEY_HEX = "3e3d116a3066b05ccb893a2abefd93a6c6700ff4dbe25e17137edcd7ac7e7ef9"
 
 
 def check_readable(path: Path) -> List[Path]:
@@ -64,36 +65,12 @@ class SqlCipherError(RuntimeError):
     """Raised when SQLCipher support is missing or inadequate."""
 
 
-def read_key_hex(config_path: str) -> str:
-    """Return the Signal database key from ``config_path`` as hex string."""
-
-    if not os.path.isfile(config_path):
-        fail(f"Config file not found: {config_path}")
-    if check_readable(Path(config_path)):
-        fail(f"Config file not readable: {config_path}. Check permissions.")
-    try:
-        with open(config_path, "r", encoding="utf-8") as fh:
-            cfg = json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
-        fail(f"Could not read config {config_path}: {exc}")
-
-    key_b64 = cfg.get("key")
-    encrypted_key = cfg.get("encryptedKey")
-    if key_b64:
-        return base64.b64decode(key_b64).hex()
-    if encrypted_key:
-        # ``encryptedKey`` in newer configs is already hex encoded
-        return encrypted_key
-    fail(f"Config {config_path} missing 'key' or 'encryptedKey'")
-
-
-def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connection:
+def open_db(db_path: str, key_hex: str) -> sqlite3.Connection:
     """Open a Signal SQLite database using SQLCipher-enabled bindings.
 
     The database is accessed via a SQLCipher driver such as ``pysqlcipher3``.
-    When ``config_path`` is provided the decryption key is applied to unlock
-    encrypted databases.  A :class:`SqlCipherError` is raised when suitable
-    bindings are missing.
+    The provided ``key_hex`` is applied to unlock encrypted databases.  A
+    :class:`SqlCipherError` is raised when suitable bindings are missing.
     """
 
     if not os.path.isfile(db_path):
@@ -128,14 +105,11 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
             "SQLCipher support is required to open this database."
         )
 
-    key_hex = None
-    if config_path:
-        key_hex = read_key_hex(config_path)
-        conn.execute(f"PRAGMA key = \"x'{key_hex}'\";")
-        try:
-            conn.execute("PRAGMA cipher_migrate;")
-        except sqlite3.DatabaseError:
-            pass
+    conn.execute(f"PRAGMA key = \"x'{key_hex}'\";")
+    try:
+        conn.execute("PRAGMA cipher_migrate;")
+    except sqlite3.DatabaseError:
+        pass
 
     # Validate access by running a trivial query. If the database is encrypted
     # and no key was supplied this will raise a DatabaseError.
@@ -143,23 +117,18 @@ def open_db(db_path: str, config_path: Optional[str] = None) -> sqlite3.Connecti
         conn.execute("SELECT count(*) FROM sqlite_master;")
     except sqlite3.DatabaseError as exc:
         conn.close()
-        if key_hex:
-            fail(
-                "Database query failed after applying key "
-                f"{key_hex}; the key might be wrong or the database corrupted: {exc}"
-            )
         fail(
-            "Could not read database. It may be encrypted; provide the Signal "
-            "config.json containing the key."
+            "Could not read database. The key might be wrong or the database "
+            f"corrupted: {exc}"
         )
     return conn
 
 
-def list_recipients(db_path: str, config_path: Optional[str] = None) -> List[str]:
+def list_recipients(db_path: str, key_hex: str) -> List[str]:
     """Return sorted list of recipients present in the Signal database."""
 
     try:
-        conn = open_db(db_path, config_path)
+        conn = open_db(db_path, key_hex)
     except SqlCipherError:
         fail(
             "Database is likely encrypted or requires SQLCipher support. "
@@ -186,7 +155,7 @@ def export_chat(
     start_date: str,
     end_date: str,
     output_pdf: str,
-    config_path: Optional[str] = None,
+    key_hex: str,
 ) -> None:
     """Export messages with ``recipient`` between ``start_date`` and ``end_date``.
 
@@ -202,12 +171,12 @@ def export_chat(
         End of the period (``YYYY-MM-DD``).
     output_pdf: str
         Path to the generated PDF file.
-    config_path: Optional[str]
-        Path to the ``config.json`` containing the DB key.
+    key_hex: str
+        Database key in hex format.
     """
 
     try:
-        conn = open_db(db_path, config_path)
+        conn = open_db(db_path, key_hex)
     except SqlCipherError as exc:
         fail(str(exc))
     cur = conn.cursor()
@@ -271,12 +240,6 @@ def export_chat(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export Signal chat to PDF")
     parser.add_argument("--db", help="Path to Signal SQLite DB")
-    parser.add_argument("--config", help="Path to Signal config.json with key")
-    parser.add_argument(
-        "--print-hex-key",
-        action="store_true",
-        help="Print hex key from config.json and exit",
-    )
     parser.add_argument("--recipient", help="Phone number or contact identifier")
     parser.add_argument("--start", help="Start date YYYY-MM-DD")
     parser.add_argument("--end", help="End date YYYY-MM-DD")
@@ -284,46 +247,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    config_file = Path.home() / ".signaltobook_config.json"
-
-    def load_config():
-        try:
-            with open(config_file, "r", encoding="utf-8") as fh:
-                return json.load(fh)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return {}
-
-    def save_config(cfg):
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_file, "w", encoding="utf-8") as fh:
-            json.dump(cfg, fh)
-
-    cfg = load_config()
-
-    config_path = (
-        args.config
-        or input(
-            f"Path to Signal config.json [{cfg.get('config_path', '')}]: "
-        ).strip()
-        or cfg.get("config_path")
-    )
-
-    if args.print_hex_key:
-        if not config_path:
-            fail("Config path is required to print hex key")
-        print(read_key_hex(config_path))
-        raise SystemExit(0)
-
-    db_path = (
-        args.db
-        or input(f"Path to Signal SQLite DB [{cfg.get('db_path', '')}]: ").strip()
-        or cfg.get("db_path")
-    )
+    db_path = args.db or input("Path to Signal SQLite DB: ").strip()
 
     if args.recipient:
         recipient = args.recipient
     else:
-        recipients = list_recipients(db_path, config_path)
+        recipients = list_recipients(db_path, DB_KEY_HEX)
         print("Available recipients:")
         for idx, addr in enumerate(recipients, 1):
             print(f"{idx}: {addr}")
@@ -338,13 +267,7 @@ if __name__ == "__main__":
         start_date, end_date = args.start, args.end
     else:
         while True:
-            default_range = f"{cfg.get('start_date', '')} {cfg.get('end_date', '')}".strip()
-            raw = input(
-                f"Date range (YYYY-MM-DD YYYY-MM-DD) [{default_range}]: "
-            ).strip()
-            if not raw and cfg.get("start_date") and cfg.get("end_date"):
-                start_date, end_date = cfg["start_date"], cfg["end_date"]
-                break
+            raw = input("Date range (YYYY-MM-DD YYYY-MM-DD): ").strip()
             date_range = raw.split()
             if len(date_range) == 2:
                 start_date, end_date = date_range
@@ -363,21 +286,11 @@ if __name__ == "__main__":
         or default_output
     )
 
-    save_config(
-        {
-            **cfg,
-            "db_path": db_path,
-            "config_path": config_path,
-            "start_date": start_date,
-            "end_date": end_date,
-        }
-    )
-
     export_chat(
         db_path,
         recipient,
         start_date,
         end_date,
         output_pdf,
-        config_path,
+        DB_KEY_HEX,
     )
