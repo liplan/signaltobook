@@ -702,7 +702,8 @@ def export_chat(
 
     # Initialize PDF document with Unicode support
     pdf = PDF()
-    pdf.set_doc_option("core_fonts_encoding", "utf-8")
+    if hasattr(pdf, "set_doc_option"):
+        pdf.set_doc_option("core_fonts_encoding", "utf-8")
     font_path = Path(__file__).parent / "dejavu-sans" / "DejaVuSans.ttf"
     ensure_font(font_path)
     pdf.add_font("DejaVuSans", "", str(font_path), uni=True)
