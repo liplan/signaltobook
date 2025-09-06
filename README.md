@@ -19,9 +19,9 @@ The script relies on SQLCipher-enabled Python bindings such as
 [`sqlcipher3`](https://pypi.org/project/sqlcipher3/) together with the
 `fpdf2` package for PDF creation. Unencrypted Signal databases can be
 opened directly, while encrypted ones require the associated SQLCipher
-key to access their contents. To render Unicode characters, download a
-TrueType font file such as `DejaVuSans.ttf` and place it in the project
-directory next to `export_signal_pdf.py`.
+key to access their contents. To render Unicode characters the script
+uses the `DejaVuSans` TrueType font. The file `DejaVuSans.ttf` is
+downloaded automatically if it is not present in the project directory.
 
 If the `encryptedKey` is itself encrypted, a dedicated tool may be
 required to obtain the usable key. One approach is to compile and run a
