@@ -2,7 +2,9 @@
 
 A simple Python utility that exports messages from a Signal SQLite
 Database to a formatted PDF document. It can include image attachments
-and filter the exported conversation by a date range.
+and filter the exported conversation by a date range. Forwarded messages
+and other text-based attachments are included, and attachment paths are
+resolved across common Signal storage locations.
 
 ## Usage
 
