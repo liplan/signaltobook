@@ -20,7 +20,7 @@ body { font-family: DejaVuSans; font-size: 12px; }
   {% if msg.attachment and msg.mime and msg.mime.startswith('image') %}
     <img src="{{ msg.attachment }}" width="100">
   {% elif msg.attachment %}
-    <div class="attachment">[Attachment: {{ msg.attachment_name }}]</div>
+    <div>[Attachment: {{ msg.attachment_name }}]</div>
   {% endif %}
 </div>
 {% endfor %}
