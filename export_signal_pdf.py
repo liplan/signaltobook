@@ -35,7 +35,13 @@ except ImportError:  # pragma: no cover - fallback only used when pysqlcipher3 m
     except ImportError:  # pragma: no cover - handled in open_db
         sqlite3 = None
 
-from fpdf import FPDF
+from fpdf import FPDF, HTMLMixin
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+
+class PDF(FPDF, HTMLMixin):
+    """FPDF class extended with HTML rendering support."""
+    pass
 
 
 DB_KEY_HEX = "3e3d116a3066b05ccb893a2abefd93a6c6700ff4dbe25e17137edcd7ac7e7ef9"
@@ -432,6 +438,7 @@ def export_chat(
     end_date: str,
     output_pdf: str,
     key_hex: str,
+    template_path: Optional[str] = None,
 ) -> bool:
     """Export messages from ``conversation_id`` between ``start_date`` and ``end_date``.
 
@@ -526,17 +533,16 @@ def export_chat(
         )
         return False
 
-    pdf = FPDF()
+    pdf = PDF()
     font_path = Path(__file__).parent / "dejavu-sans" / "DejaVuSans.ttf"
     ensure_font(font_path)
     pdf.add_font("DejaVu", "", str(font_path), uni=True)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     pdf.set_font("DejaVu", size=12)
-    # Smaller line height and spacing between messages
-    line_height = 6
-    message_spacing = 3
+
     missing_attachments: List[str] = []
+    messages: List[dict] = []
 
     for date_ms, body, attachment_path, mime, sender_flag in rows:
         date_str = datetime.fromtimestamp(date_ms / 1000).strftime(
@@ -566,35 +572,28 @@ def export_chat(
         sender = sanitize_text(
             SELF_LABEL if is_outgoing(sender_flag) else conversation_label, pdf
         )
-        pdf.multi_cell(0, line_height, f"{date_str} {sender}: {text}")
 
-        if resolved_path and mime and mime.startswith("image"):
-            if check_readable(Path(resolved_path)):
-                missing_attachments.append(f"{resolved_path} (no read permission)")
-            else:
-                mime_main = mime.split(";")[0].lower()
-                mime_to_fpdf = {
-                    "image/jpeg": "JPEG",
-                    "image/jpg": "JPEG",
-                    "image/png": "PNG",
-                    "image/gif": "GIF",
-                }
-                kwargs = {"w": 100}
-                img_type = mime_to_fpdf.get(mime_main)
-                if img_type:
-                    kwargs["type"] = img_type
-                try:
-                    pdf.image(resolved_path, **kwargs)
-                    pdf.ln(line_height)
-                except RuntimeError:
-                    missing_attachments.append(
-                        f"{resolved_path} (unsupported image type)"
-                    )
-        elif resolved_path:
-            pdf.multi_cell(0, line_height, f"[Attachment: {Path(resolved_path).name}]")
-        pdf.ln(message_spacing)
+        messages.append(
+            {
+                "date": date_str,
+                "sender": sender,
+                "text": text,
+                "attachment": resolved_path,
+                "attachment_name": Path(resolved_path).name if resolved_path else None,
+                "mime": mime,
+            }
+        )
 
+    template_file = Path(template_path) if template_path else Path(__file__).parent / "template.html"
+    env = Environment(
+        loader=FileSystemLoader(str(template_file.parent)),
+        autoescape=select_autoescape(["html", "xml"]),
+    )
+    template = env.get_template(template_file.name)
+    html = template.render(conversation_label=conversation_label, messages=messages)
+    pdf.write_html(html)
     pdf.output(output_pdf)
+
     if missing_attachments:
         print("⚠️ Some image attachments could not be embedded:")
         for msg in missing_attachments:
@@ -613,6 +612,7 @@ if __name__ == "__main__":
     parser.add_argument("--start", help="Start date YYYY-MM-DD")
     parser.add_argument("--end", help="End date YYYY-MM-DD")
     parser.add_argument("--output", help="Path to the output PDF file")
+    parser.add_argument("--template", help="Path to HTML template for styling")
 
     args = parser.parse_args()
 
@@ -696,6 +696,7 @@ if __name__ == "__main__":
             end_date,
             output_pdf,
             DB_KEY_HEX,
+            args.template,
         ):
             config.update(
                 {
