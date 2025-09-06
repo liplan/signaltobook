@@ -124,6 +124,27 @@ def open_db(db_path: str, key_hex: str) -> sqlite3.Connection:
     return conn
 
 
+def confirm_db_connection(db_path: str, key_hex: str) -> None:
+    """Validate access to ``db_path`` and show available tables."""
+
+    try:
+        conn = open_db(db_path, key_hex)
+    except SqlCipherError as exc:
+        fail(str(exc))
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    except sqlite3.DatabaseError as exc:
+        conn.close()
+        fail(f"Could not list tables: {exc}")
+    tables = [row[0] for row in cur.fetchall()]
+    print("Successfully connected to database. Available tables:")
+    for name in tables:
+        print(f" - {name}")
+    conn.close()
+    input("Press Enter to continue...")
+
+
 def list_recipients(db_path: str, key_hex: str) -> List[str]:
     """Return sorted list of recipients present in the Signal database."""
 
@@ -248,6 +269,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     db_path = args.db or input("Path to Signal SQLite DB: ").strip()
+    confirm_db_connection(db_path, DB_KEY_HEX)
 
     if args.recipient:
         recipient = args.recipient
