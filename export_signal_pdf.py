@@ -23,7 +23,6 @@ query in this script targets the common tables `messages` and
 import argparse
 import json
 import os
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Optional, Any
@@ -92,23 +91,17 @@ def fail(message: str) -> None:
 def ensure_font(font_path: Path) -> None:
     """Ensure that `DejaVuSans.ttf` exists at ``font_path``.
 
-    The font is downloaded automatically when missing. If the download
-    fails a :class:`FileNotFoundError` is raised to mirror the previous
-    behaviour where users had to provide the file manually.
+    A :class:`FileNotFoundError` is raised when the font is missing so the
+    caller can provide a helpful error message.
     """
 
     if font_path.exists():
         return
 
-    url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf"
-    try:
-        with urllib.request.urlopen(url) as resp:
-            font_path.write_bytes(resp.read())
-    except Exception as exc:  # pragma: no cover - network failure is rare
-        raise FileNotFoundError(
-            f"Unicode font file not found: {font_path}. Automatic download failed. "
-            "Download DejaVuSans.ttf and place it next to export_signal_pdf.py."
-        ) from exc
+    raise FileNotFoundError(
+        f"Unicode font file not found: {font_path}. Ensure the DejaVu Sans "
+        "font files are available."
+    )
 
 
 class SqlCipherError(RuntimeError):
@@ -447,7 +440,7 @@ def export_chat(
         return False
 
     pdf = FPDF()
-    font_path = Path(__file__).with_name("DejaVuSans.ttf")
+    font_path = Path(__file__).parent / "dejavu-sans" / "DejaVuSans.ttf"
     ensure_font(font_path)
     pdf.add_font("DejaVu", "", str(font_path), uni=True)
     pdf.set_auto_page_break(auto=True, margin=15)
