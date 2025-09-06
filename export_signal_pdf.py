@@ -226,7 +226,19 @@ def list_conversations(db_path: str, key_hex: str) -> List[Tuple[str, str]]:
     conn.close()
     if not rows:
         fail("No conversations found in the database.")
-    return rows
+
+    # Only keep conversations with human readable names. The label must contain
+    # at least one alphabetic character to avoid showing bare identifiers or
+    # phone numbers. This filters the recipients list to entries that actually
+    # have a name stored in the database.
+    filtered = [
+        (cid, label)
+        for cid, label in rows
+        if any(ch.isalpha() for ch in label)
+    ]
+    if not filtered:
+        fail("No named conversations found in the database.")
+    return filtered
 
 
 def detect_message_schema(cur: Any) -> dict:
@@ -325,7 +337,7 @@ def export_chat(
     end_date: str,
     output_pdf: str,
     key_hex: str,
-) -> None:
+) -> bool:
     """Export messages from ``conversation_id`` between ``start_date`` and ``end_date``.
 
     Parameters
@@ -342,6 +354,12 @@ def export_chat(
         Path to the generated PDF file.
     key_hex: str
         Database key in hex format.
+
+    Returns
+    -------
+    bool
+        ``True`` if messages were exported and the PDF was created, ``False``
+        when no messages exist for the given selection.
     """
 
     try:
@@ -398,6 +416,13 @@ def export_chat(
         )
     rows = cur.fetchall()
 
+    if not rows:
+        conn.close()
+        print(
+            "⚠️ No messages found for the selected conversation and date range."
+        )
+        return False
+
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -428,6 +453,7 @@ def export_chat(
         for msg in missing_attachments:
             print(f"   - {msg}")
     conn.close()
+    return True
 
 
 if __name__ == "__main__":
@@ -451,81 +477,86 @@ if __name__ == "__main__":
         fail("Path to Signal SQLite DB is required.")
     confirm_db_connection(db_path, DB_KEY_HEX)
 
-    if args.conversation:
-        conversation_id = args.conversation
-    else:
-        conversations = list_conversations(db_path, DB_KEY_HEX)
-        print("Available conversations:")
-        for idx, (cid, label) in enumerate(conversations, 1):
-            display = f"{label} ({cid})" if label != cid else cid
-            print(f"{idx}: {display}")
-        prev_id = config.get("conversation_id")
-        default_idx = next(
-            (i for i, (cid, _label) in enumerate(conversations, 1) if cid == prev_id),
-            None,
-        )
-        while True:
-            prompt = "Select conversation number"
-            if default_idx:
-                prompt += f" [{default_idx}]"
-            choice = input(prompt + ": ").strip()
-            if not choice and default_idx:
-                conversation_id = conversations[default_idx - 1][0]
-                break
-            if choice.isdigit() and 1 <= int(choice) <= len(conversations):
-                conversation_id = conversations[int(choice) - 1][0]
-                break
-            print("Please enter a valid number.")
+    conversations = list_conversations(db_path, DB_KEY_HEX)
 
-    if args.start and args.end:
-        start_date, end_date = args.start, args.end
-    else:
-        start_default = config.get("start_date", "")
-        end_default = config.get("end_date", "")
-        while True:
-            prompt = "Date range (YYYY-MM-DD YYYY-MM-DD)"
-            if start_default and end_default:
-                prompt += f" [{start_default} {end_default}]"
-            raw = input(prompt + ": ").strip()
-            if not raw and start_default and end_default:
-                start_date, end_date = start_default, end_default
-                break
-            date_range = raw.split()
-            if len(date_range) == 2:
-                start_date, end_date = date_range
-                try:
-                    datetime.strptime(start_date, "%Y-%m-%d")
-                    datetime.strptime(end_date, "%Y-%m-%d")
+    while True:
+        if args.conversation:
+            conversation_id = args.conversation
+        else:
+            print("Available conversations:")
+            for idx, (cid, label) in enumerate(conversations, 1):
+                display = f"{label} ({cid})" if label != cid else cid
+                print(f"{idx}: {display}")
+            prev_id = config.get("conversation_id")
+            default_idx = next(
+                (i for i, (cid, _label) in enumerate(conversations, 1) if cid == prev_id),
+                None,
+            )
+            while True:
+                prompt = "Select conversation number"
+                if default_idx:
+                    prompt += f" [{default_idx}]"
+                choice = input(prompt + ": ").strip()
+                if not choice and default_idx:
+                    conversation_id = conversations[default_idx - 1][0]
                     break
-                except ValueError:
-                    pass
-            print("Please provide valid dates separated by space.")
+                if choice.isdigit() and 1 <= int(choice) <= len(conversations):
+                    conversation_id = conversations[int(choice) - 1][0]
+                    break
+                print("Please enter a valid number.")
 
-    suggested_output = config.get(
-        "output_pdf", f"chat_{start_date}_{end_date}.pdf"
-    )
-    output_pdf = (
-        args.output
-        or input(f"Output PDF filename [{suggested_output}]: ").strip()
-        or suggested_output
-    )
+        if args.start and args.end:
+            start_date, end_date = args.start, args.end
+        else:
+            start_default = config.get("start_date", "")
+            end_default = config.get("end_date", "")
+            while True:
+                prompt = "Date range (YYYY-MM-DD YYYY-MM-DD)"
+                if start_default and end_default:
+                    prompt += f" [{start_default} {end_default}]"
+                raw = input(prompt + ": ").strip()
+                if not raw and start_default and end_default:
+                    start_date, end_date = start_default, end_default
+                    break
+                date_range = raw.split()
+                if len(date_range) == 2:
+                    start_date, end_date = date_range
+                    try:
+                        datetime.strptime(start_date, "%Y-%m-%d")
+                        datetime.strptime(end_date, "%Y-%m-%d")
+                        break
+                    except ValueError:
+                        pass
+                print("Please provide valid dates separated by space.")
 
-    export_chat(
-        db_path,
-        conversation_id,
-        start_date,
-        end_date,
-        output_pdf,
-        DB_KEY_HEX,
-    )
+        suggested_output = config.get(
+            "output_pdf", f"chat_{start_date}_{end_date}.pdf"
+        )
+        output_pdf = (
+            args.output
+            or input(f"Output PDF filename [{suggested_output}]: ").strip()
+            or suggested_output
+        )
 
-    config.update(
-        {
-            "db_path": db_path,
-            "conversation_id": conversation_id,
-            "start_date": start_date,
-            "end_date": end_date,
-            "output_pdf": output_pdf,
-        }
-    )
-    save_config(config)
+        if export_chat(
+            db_path,
+            conversation_id,
+            start_date,
+            end_date,
+            output_pdf,
+            DB_KEY_HEX,
+        ):
+            config.update(
+                {
+                    "db_path": db_path,
+                    "conversation_id": conversation_id,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "output_pdf": output_pdf,
+                }
+            )
+            save_config(config)
+            break
+
+        print("Please choose a different conversation or date range.")
+        args.conversation = args.start = args.end = args.output = None
