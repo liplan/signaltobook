@@ -21,10 +21,11 @@ query in this script targets the common tables `messages` and
 """
 
 import argparse
+import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 try:
     from pysqlcipher3 import dbapi2 as sqlite3
@@ -38,6 +39,32 @@ from fpdf import FPDF
 
 
 DB_KEY_HEX = "3e3d116a3066b05ccb893a2abefd93a6c6700ff4dbe25e17137edcd7ac7e7ef9"
+
+
+CONFIG_FILE = Path.home() / ".signaltobook_config.json"
+
+
+def load_config() -> dict:
+    """Load persisted options from :data:`CONFIG_FILE`."""
+
+    try:
+        with CONFIG_FILE.open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_config(data: dict) -> None:
+    """Persist ``data`` to :data:`CONFIG_FILE`.
+
+    Errors are silently ignored because failing to store configuration should
+    not break the main export functionality.
+    """
+
+    try:
+        CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def check_readable(path: Path) -> List[Path]:
@@ -145,8 +172,13 @@ def confirm_db_connection(db_path: str, key_hex: str) -> None:
     input("Press Enter to continue...")
 
 
-def list_conversations(db_path: str, key_hex: str) -> List[str]:
-    """Return sorted list of conversation identifiers from the database."""
+def list_conversations(db_path: str, key_hex: str) -> List[Tuple[str, str]]:
+    """Return sorted list of ``(id, label)`` pairs for each conversation.
+
+    The function attempts several queries to obtain a human friendly label
+    such as a profile name or phone number.  When no such information is
+    available the identifier itself is used as the label.
+    """
 
     try:
         conn = open_db(db_path, key_hex)
@@ -157,26 +189,44 @@ def list_conversations(db_path: str, key_hex: str) -> List[str]:
         )
     cur = conn.cursor()
 
-    # Try to read the conversation identifiers. The primary key column can
-    # vary between Signal versions (``id`` or ``_id``). We query whichever is
-    # available. Only the identifier is returned to avoid exposing phone
-    # numbers or other personal data.
-    query = "SELECT id FROM conversations ORDER BY id;"
-    try:
-        cur.execute(query)
-    except sqlite3.DatabaseError:
-        query = "SELECT _id FROM conversations ORDER BY _id;"
+    queries = [
+        # Join with recipients table if available to show names or numbers.
+        """
+        SELECT c.id,
+               COALESCE(r.profileName, r.name, r.phone, r.e164,
+                        c.name, c.e164, c.id) AS label
+        FROM conversations AS c
+        LEFT JOIN recipients AS r ON c.recipient_id = r._id
+        ORDER BY label;
+        """,
+        """
+        SELECT c.id,
+               COALESCE(r.profileName, r.name, r.phone, r.e164,
+                        c.name, c.e164, c.id) AS label
+        FROM conversations AS c
+        LEFT JOIN recipients AS r ON c.recipientId = r._id
+        ORDER BY label;
+        """,
+        "SELECT id, COALESCE(name, e164, id) AS label FROM conversations ORDER BY label;",
+        "SELECT _id, COALESCE(name, e164, _id) AS label FROM conversations ORDER BY label;",
+        "SELECT id, id AS label FROM conversations ORDER BY id;",
+        "SELECT _id, _id AS label FROM conversations ORDER BY _id;",
+    ]
+
+    rows: List[Tuple[str, str]] = []
+    for query in queries:
         try:
             cur.execute(query)
-        except sqlite3.DatabaseError as exc:
-            conn.close()
-            fail(f"Could not read conversations from database: {exc}")
+            rows = [(str(r[0]), str(r[1])) for r in cur.fetchall()]
+            if rows:
+                break
+        except sqlite3.DatabaseError:
+            continue
 
-    conversations = [str(row[0]) for row in cur.fetchall()]
     conn.close()
-    if not conversations:
+    if not rows:
         fail("No conversations found in the database.")
-    return conversations
+    return rows
 
 
 def export_chat(
@@ -280,7 +330,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    db_path = args.db or input("Path to Signal SQLite DB: ").strip()
+    config = load_config()
+
+    db_prompt = f"Path to Signal SQLite DB [{config.get('db_path', '')}]: "
+    db_path = args.db or input(db_prompt).strip() or config.get("db_path")
+    if not db_path:
+        fail("Path to Signal SQLite DB is required.")
     confirm_db_connection(db_path, DB_KEY_HEX)
 
     if args.conversation:
@@ -288,20 +343,40 @@ if __name__ == "__main__":
     else:
         conversations = list_conversations(db_path, DB_KEY_HEX)
         print("Available conversations:")
-        for idx, cid in enumerate(conversations, 1):
-            print(f"{idx}: {cid}")
+        for idx, (cid, label) in enumerate(conversations, 1):
+            display = f"{label} ({cid})" if label != cid else cid
+            print(f"{idx}: {display}")
+        prev_id = config.get("conversation_id")
+        default_idx = next(
+            (i for i, (cid, _label) in enumerate(conversations, 1) if cid == prev_id),
+            None,
+        )
         while True:
-            choice = input("Select conversation number: ").strip()
+            prompt = "Select conversation number"
+            if default_idx:
+                prompt += f" [{default_idx}]"
+            choice = input(prompt + ": ").strip()
+            if not choice and default_idx:
+                conversation_id = conversations[default_idx - 1][0]
+                break
             if choice.isdigit() and 1 <= int(choice) <= len(conversations):
-                conversation_id = conversations[int(choice) - 1]
+                conversation_id = conversations[int(choice) - 1][0]
                 break
             print("Please enter a valid number.")
 
     if args.start and args.end:
         start_date, end_date = args.start, args.end
     else:
+        start_default = config.get("start_date", "")
+        end_default = config.get("end_date", "")
         while True:
-            raw = input("Date range (YYYY-MM-DD YYYY-MM-DD): ").strip()
+            prompt = "Date range (YYYY-MM-DD YYYY-MM-DD)"
+            if start_default and end_default:
+                prompt += f" [{start_default} {end_default}]"
+            raw = input(prompt + ": ").strip()
+            if not raw and start_default and end_default:
+                start_date, end_date = start_default, end_default
+                break
             date_range = raw.split()
             if len(date_range) == 2:
                 start_date, end_date = date_range
@@ -313,11 +388,13 @@ if __name__ == "__main__":
                     pass
             print("Please provide valid dates separated by space.")
 
-    default_output = f"chat_{start_date}_{end_date}.pdf"
+    suggested_output = config.get(
+        "output_pdf", f"chat_{start_date}_{end_date}.pdf"
+    )
     output_pdf = (
         args.output
-        or input(f"Output PDF filename [{default_output}]: ").strip()
-        or default_output
+        or input(f"Output PDF filename [{suggested_output}]: ").strip()
+        or suggested_output
     )
 
     export_chat(
@@ -328,3 +405,14 @@ if __name__ == "__main__":
         output_pdf,
         DB_KEY_HEX,
     )
+
+    config.update(
+        {
+            "db_path": db_path,
+            "conversation_id": conversation_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "output_pdf": output_pdf,
+        }
+    )
+    save_config(config)
