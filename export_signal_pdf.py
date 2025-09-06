@@ -23,6 +23,7 @@ query in this script targets the common tables `messages` and
 import argparse
 import json
 import os
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,13 @@ from fpdf import FPDF, HTMLMixin
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from PIL import Image
 
+try:  # optional HEIF support
+    import pillow_heif  # type: ignore
+
+    pillow_heif.register_heif_opener()  # pragma: no cover - optional dependency
+except Exception:  # pragma: no cover - dependency not available
+    pass
+
 # Work around missing HTML2FPDF.unescape attribute in fpdf
 try:
     from fpdf.html import HTML2FPDF  # type: ignore
@@ -50,15 +58,13 @@ except Exception:  # pragma: no cover
     pass
 
 
-def _normalize_image(path: str) -> str:
+def _normalize_image(path: str) -> Optional[str]:
     """Return a path to ``path`` converted to a PDF-compatible image.
 
-    FPDF relies on filename extensions to detect image types.  Signal stores
-    some attachments without an extension, which previously triggered
-    ``Unsupported image type`` errors.  Images in unsupported formats or
-    without a recognised extension are converted to a temporary PNG/JPEG file
-    to ensure compatibility.  Supported formats with proper extensions are
-    returned unchanged.
+    ``None`` is returned when ``path`` does not point to a readable image.  In
+    that case callers should provide a placeholder or skip the reference.
+    Supported formats with a proper extension are returned unchanged, others
+    are converted to a temporary PNG/JPEG file to ensure compatibility.
     """
 
     try:
@@ -70,15 +76,16 @@ def _normalize_image(path: str) -> str:
             if fmt in {"PNG", "JPEG", "JPG"} and ext in {".png", ".jpg", ".jpeg"}:
                 return path
 
+            # Convert everything else to PNG except JPEG which keeps its format
             suffix = ".jpg" if fmt in {"JPEG", "JPG"} else ".png"
             tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-            # Save as JPEG only when the original format is JPEG, otherwise use PNG
             out_fmt = "JPEG" if suffix == ".jpg" else "PNG"
             img.save(tmp.name, format=out_fmt)
             return tmp.name
     except Exception:
-        pass
-    return path
+        return None
+
+    return None
 
 
 class PDF(FPDF, HTMLMixin):
@@ -90,6 +97,8 @@ class PDF(FPDF, HTMLMixin):
 
     def image_map(self, src: str) -> str:  # type: ignore[override]
         new_src = _normalize_image(src)
+        if not new_src:
+            return src
         if new_src != src:
             self._tmp_images.append(new_src)
         return new_src
@@ -101,6 +110,33 @@ class PDF(FPDF, HTMLMixin):
             except OSError:
                 pass
         self._tmp_images.clear()
+
+
+_REWRITE_TMP_IMAGES: List[str] = []
+_IMG_TAG_RE = re.compile(r"<img\s+[^>]*src=['\"]([^'\"]+)['\"][^>]*>", re.IGNORECASE)
+
+
+def rewrite_img_srcs_in_html(html: str) -> str:
+    """Rewrite ``<img src>`` paths to PDF-compatible images.
+
+    Images in formats unsupported by :mod:`fpdf` (e.g. HEIC/WEBP or files
+    lacking an extension) are converted to temporary PNG/JPEG files.  Non-image
+    sources are replaced with a placeholder text.
+    """
+
+    global _REWRITE_TMP_IMAGES
+    _REWRITE_TMP_IMAGES = []
+
+    def repl(match: re.Match) -> str:
+        src = match.group(1)
+        new_src = _normalize_image(src)
+        if not new_src:
+            return "[Unsupported image]"
+        if new_src != src:
+            _REWRITE_TMP_IMAGES.append(new_src)
+        return match.group(0).replace(src, new_src)
+
+    return _IMG_TAG_RE.sub(repl, html)
 
 
 DB_KEY_HEX = "3e3d116a3066b05ccb893a2abefd93a6c6700ff4dbe25e17137edcd7ac7e7ef9"
@@ -650,6 +686,8 @@ def export_chat(
     )
     template = env.get_template(template_file.name)
     html = template.render(conversation_label=conversation_label, messages=messages)
+    html = rewrite_img_srcs_in_html(html)
+    pdf._tmp_images.extend(_REWRITE_TMP_IMAGES)
     pdf.write_html(html)
     pdf.output(output_pdf)
     pdf.cleanup()
