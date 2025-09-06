@@ -31,6 +31,12 @@ opened directly, while encrypted ones require the accompanying
 either contain a base64 encoded `key` field or an `encryptedKey` field
 with the key already encoded as hex.
 
+If the `encryptedKey` is itself encrypted, a dedicated tool may be
+required to obtain the usable key. One approach is to compile and run a
+community Rust utility (available on GitHub) which produces a decrypted
+key via the `signal-descriptions` binary in its `target` directory. This
+can be useful when shell based methods fail to decode the `encryptedKey`.
+
 ## Interactive mode
 
 When run without command line arguments the script will prompt for the
