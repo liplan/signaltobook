@@ -23,9 +23,11 @@ query in this script targets the common tables `messages` and
 import argparse
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Optional, Any
+import unicodedata
 
 try:
     from pysqlcipher3 import dbapi2 as sqlite3
@@ -113,6 +115,14 @@ def sanitize_text(text: str, pdf: FPDF) -> str:
     return "".join(
         ch if 0 <= ord(ch) <= max_codepoint else "?" for ch in text
     )
+
+
+def sanitize_filename(text: str) -> str:
+    """Return a filesystem-friendly version of ``text``."""
+
+    normalized = unicodedata.normalize("NFKD", text)
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^A-Za-z0-9]+", "_", ascii_text).strip("_") or "chat"
 
 
 class SqlCipherError(RuntimeError):
@@ -508,10 +518,14 @@ if __name__ == "__main__":
     confirm_db_connection(db_path, DB_KEY_HEX)
 
     conversations = list_conversations(db_path, DB_KEY_HEX)
-
     while True:
+        conversation_label = ""
         if args.conversation:
             conversation_id = args.conversation
+            conversation_label = next(
+                (label for cid, label in conversations if cid == conversation_id),
+                conversation_id,
+            )
         else:
             print("Available conversations:")
             for idx, (cid, label) in enumerate(conversations, 1):
@@ -528,10 +542,10 @@ if __name__ == "__main__":
                     prompt += f" [{default_idx}]"
                 choice = input(prompt + ": ").strip()
                 if not choice and default_idx:
-                    conversation_id = conversations[default_idx - 1][0]
+                    conversation_id, conversation_label = conversations[default_idx - 1]
                     break
                 if choice.isdigit() and 1 <= int(choice) <= len(conversations):
-                    conversation_id = conversations[int(choice) - 1][0]
+                    conversation_id, conversation_label = conversations[int(choice) - 1]
                     break
                 print("Please enter a valid number.")
 
@@ -559,8 +573,9 @@ if __name__ == "__main__":
                         pass
                 print("Please provide valid dates separated by space.")
 
+        label_safe = sanitize_filename(conversation_label)
         suggested_output = config.get(
-            "output_pdf", f"chat_{start_date}_{end_date}.pdf"
+            "output_pdf", f"{label_safe}_{start_date}_{end_date}.pdf"
         )
         output_pdf = (
             args.output

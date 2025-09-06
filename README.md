@@ -36,6 +36,7 @@ database path. It reads all conversation identifiers from the database and
 shows available recipients with known names or phone numbers to choose from.
 After selecting the date range the values are stored in
 `~/.signaltobook_config.json` and offered as defaults on subsequent runs. The
-output PDF name is derived from the selected date range (e.g.
-`chat_2020-12-01_2020-12-24.pdf`).
+output PDF name is derived from the conversation partner and date range (e.g.
+`alice_2020-12-01_2020-12-24.pdf`).  Non-alphanumeric characters are stripped
+from the conversation name.
 
