@@ -216,15 +216,9 @@ def ensure_font(font_path: Path) -> None:
     )
 
 def sanitize_text(text: str, pdf: FPDF) -> str:
-    """Return ``text`` stripped of characters unsupported by ``pdf``'s font."""
+    """Return ``text`` encoded as Latin-1, replacing unsupported chars."""
 
-    font = pdf.current_font
-    if not font:
-        return text
-    max_codepoint = font.get("maxUni", len(font.get("cw", [])) - 1)
-    return "".join(
-        ch if 0 <= ord(ch) <= max_codepoint else "?" for ch in text
-    )
+    return text.encode("latin-1", "replace").decode("latin-1")
 
 
 def resolve_attachment_path(raw_path: Optional[str]) -> Optional[str]:
