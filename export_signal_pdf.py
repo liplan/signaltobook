@@ -40,6 +40,8 @@ from fpdf import FPDF
 
 DB_KEY_HEX = "3e3d116a3066b05ccb893a2abefd93a6c6700ff4dbe25e17137edcd7ac7e7ef9"
 
+# Label used for messages sent by the user
+SELF_LABEL = "You"
 
 CONFIG_FILE = Path.home() / ".signaltobook_config.json"
 
@@ -113,6 +115,24 @@ def sanitize_text(text: str, pdf: FPDF) -> str:
     return "".join(
         ch if 0 <= ord(ch) <= max_codepoint else "?" for ch in text
     )
+
+
+def is_outgoing(flag: Any) -> bool:
+    """Return ``True`` if ``flag`` indicates an outgoing message.
+
+    The function accepts common representations such as boolean values,
+    numeric markers, or descriptive strings like ``"outgoing"``. Values that
+    cannot be interpreted are treated as ``False`` (incoming).
+    """
+
+    if flag is None:
+        return False
+    if isinstance(flag, str):
+        return flag.lower() in {"outgoing", "sent", "true", "1"}
+    try:
+        return int(flag) > 0
+    except (TypeError, ValueError):
+        return bool(flag)
 
 
 class SqlCipherError(RuntimeError):
@@ -297,6 +317,13 @@ def detect_message_schema(cur: Any) -> dict:
     ]
     body_cols = ["body", "message", "text", "content"]
     id_cols = ["_id", "id"]
+    sender_cols = [
+        "from_me",
+        "is_from_me",
+        "isOutgoing",
+        "is_outgoing",
+        "type",
+    ]
 
     for table in tables:
         try:
@@ -308,6 +335,7 @@ def detect_message_schema(cur: Any) -> dict:
         date_col = next((c for c in date_cols if c in cols), None)
         body_col = next((c for c in body_cols if c in cols), None)
         id_col = next((c for c in id_cols if c in cols), None)
+        sender_col = next((c for c in sender_cols if c in cols), None)
         if conv_col and date_col and body_col and id_col:
             return {
                 "table": table,
@@ -315,6 +343,7 @@ def detect_message_schema(cur: Any) -> dict:
                 "date": date_col,
                 "body": body_col,
                 "id": id_col,
+                "sender": sender_col,
             }
 
     fail("Could not detect messages table with expected columns.")
@@ -360,6 +389,7 @@ def detect_attachment_schema(cur: Any, msg_id_col: str) -> Optional[dict]:
 def export_chat(
     db_path: str,
     conversation_id: str,
+    conversation_label: str,
     start_date: str,
     end_date: str,
     output_pdf: str,
@@ -373,6 +403,8 @@ def export_chat(
         Path to the Signal SQLite database.
     conversation_id: str
         Identifier of the conversation selected from the ``conversations`` table.
+    conversation_label: str
+        Human readable name of the chat partner.
     start_date: str
         Start of the period (``YYYY-MM-DD``).
     end_date: str
@@ -397,6 +429,10 @@ def export_chat(
     schema = detect_message_schema(cur)
     attachment = detect_attachment_schema(cur, schema["id"])
 
+    direction_expr = (
+        f"m.{schema['sender']} AS sender" if schema.get("sender") else "NULL AS sender"
+    )
+
     start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
     end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
 
@@ -412,7 +448,8 @@ def export_chat(
         SELECT m.{schema['date']} AS date,
                m.{schema['body']} AS body,
                {path_expr} AS attachment_path,
-               {mime_expr} AS contentType
+               {mime_expr} AS contentType,
+               {direction_expr}
         FROM {schema['table']} AS m
         LEFT JOIN {attachment['table']} AS a
                ON m.{schema['id']} = a.{attachment['fk']}
@@ -428,7 +465,8 @@ def export_chat(
         SELECT m.{schema['date']} AS date,
                m.{schema['body']} AS body,
                NULL AS attachment_path,
-               NULL AS contentType
+               NULL AS contentType,
+               {direction_expr}
         FROM {schema['table']} AS m
         WHERE m.{schema['conv']} = ? AND m.{schema['date']} BETWEEN ? AND ?
         ORDER BY m.{schema['date']} ASC;
@@ -459,12 +497,15 @@ def export_chat(
     pdf.set_font("DejaVu", size=12)
     missing_attachments: List[str] = []
 
-    for date_ms, body, attachment_path, mime in rows:
+    for date_ms, body, attachment_path, mime, sender_flag in rows:
         date_str = datetime.fromtimestamp(date_ms / 1000).strftime(
             "%Y-%m-%d %H:%M"
         )
         text = sanitize_text(body or "", pdf)
-        pdf.multi_cell(0, 10, f"{date_str}: {text}")
+        sender = sanitize_text(
+            SELF_LABEL if is_outgoing(sender_flag) else conversation_label, pdf
+        )
+        pdf.multi_cell(0, 10, f"{date_str} {sender}: {text}")
         if attachment_path and mime and mime.startswith("image"):
             if not os.path.exists(attachment_path):
                 missing_attachments.append(f"{attachment_path} (not found)")
@@ -508,10 +549,12 @@ if __name__ == "__main__":
     confirm_db_connection(db_path, DB_KEY_HEX)
 
     conversations = list_conversations(db_path, DB_KEY_HEX)
+    conv_lookup = {cid: label for cid, label in conversations}
 
     while True:
         if args.conversation:
             conversation_id = args.conversation
+            conversation_label = conv_lookup.get(conversation_id, conversation_id)
         else:
             print("Available conversations:")
             for idx, (cid, label) in enumerate(conversations, 1):
@@ -534,6 +577,7 @@ if __name__ == "__main__":
                     conversation_id = conversations[int(choice) - 1][0]
                     break
                 print("Please enter a valid number.")
+            conversation_label = conv_lookup.get(conversation_id, conversation_id)
 
         if args.start and args.end:
             start_date, end_date = args.start, args.end
@@ -571,6 +615,7 @@ if __name__ == "__main__":
         if export_chat(
             db_path,
             conversation_id,
+            conversation_label,
             start_date,
             end_date,
             output_pdf,
@@ -580,6 +625,7 @@ if __name__ == "__main__":
                 {
                     "db_path": db_path,
                     "conversation_id": conversation_id,
+                    "conversation_label": conversation_label,
                     "start_date": start_date,
                     "end_date": end_date,
                     "output_pdf": output_pdf,
