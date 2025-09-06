@@ -424,9 +424,16 @@ def export_chat(
         return False
 
     pdf = FPDF()
+    font_path = Path(__file__).with_name("DejaVuSans.ttf")
+    if not font_path.exists():
+        raise FileNotFoundError(
+            f"Unicode font file not found: {font_path}. "
+            "Download DejaVuSans.ttf and place it next to export_signal_pdf.py."
+        )
+    pdf.add_font("DejaVu", "", str(font_path), uni=True)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-    pdf.set_font("Arial", size=12)
+    pdf.set_font("DejaVu", size=12)
     missing_attachments: List[str] = []
 
     for date_ms, body, attachment_path, mime in rows:
