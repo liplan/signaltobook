@@ -167,7 +167,7 @@ def inline_css(html: str, base_path: Optional[Path] = None) -> str:
         ):
             css_file = (base_path / href).resolve()
             try:
-                css_blocks.append(css_file.read_text())
+                css_blocks.append(css_file.read_text(encoding="utf-8"))
             except OSError:
                 pass
         html = re.sub(
@@ -294,9 +294,9 @@ def ensure_font(font_path: Path) -> None:
     )
 
 def sanitize_text(text: str, pdf: FPDF) -> str:
-    """Return ``text`` encoded as Latin-1, replacing unsupported chars."""
+    """Return ``text`` unchanged."""
 
-    return text.encode("latin-1", "replace").decode("latin-1")
+    return text
 
 
 def resolve_attachment_path(raw_path: Optional[str]) -> Optional[str]:
@@ -702,6 +702,7 @@ def export_chat(
 
     # Initialize PDF document with Unicode support
     pdf = PDF()
+    pdf.set_doc_option("core_fonts_encoding", "utf-8")
     font_path = Path(__file__).parent / "dejavu-sans" / "DejaVuSans.ttf"
     ensure_font(font_path)
     pdf.add_font("DejaVuSans", "", str(font_path), uni=True)
@@ -736,13 +737,9 @@ def export_chat(
         if not body and not resolved_path:
             body = "Nachricht wurde gelöscht"
 
-        text = Markup(sanitize_text(body or "", pdf).replace("\n", "<br>"))
-        sender = sanitize_text(
-            SELF_LABEL if is_outgoing(sender_flag) else conversation_label, pdf
-        )
-        attachment_name = (
-            sanitize_text(Path(resolved_path).name, pdf) if resolved_path else None
-        )
+        text = Markup((body or "").replace("\n", "<br>"))
+        sender = SELF_LABEL if is_outgoing(sender_flag) else conversation_label
+        attachment_name = Path(resolved_path).name if resolved_path else None
 
         messages.append(
             {
@@ -757,11 +754,10 @@ def export_chat(
 
     template_file = Path(template_path) if template_path else Path(__file__).parent / "template.html"
     env = Environment(
-        loader=FileSystemLoader(str(template_file.parent)),
+        loader=FileSystemLoader(str(template_file.parent), encoding="utf-8"),
         autoescape=select_autoescape(["html", "xml"]),
     )
     template = env.get_template(template_file.name)
-    conversation_label = sanitize_text(conversation_label, pdf)
     html = template.render(conversation_label=conversation_label, messages=messages)
     html = inline_css(html, template_file.parent)
     html = rewrite_img_srcs_in_html(html)
