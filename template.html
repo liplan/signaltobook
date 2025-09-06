@@ -8,7 +8,7 @@
 {% for msg in messages %}
 <div style="margin-bottom:6px">
   <div style="color:#555555;font-size:9px">{{ msg.date }} <span style="font-weight:bold">{{ msg.sender }}</span></div>
-  <div style="margin-left:5px">{{ msg.text }}</div>
+  <div style="margin-left:5px">{{ msg.text | replace('\n', '<br>') | safe }}</div>
   {% if msg.attachment and msg.mime and msg.mime.startswith('image') %}
     <img src="{{ msg.attachment }}" width="100">
   {% elif msg.attachment %}
