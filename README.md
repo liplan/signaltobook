@@ -21,6 +21,12 @@ The script relies on SQLCipher-enabled Python bindings such as
 opened directly, while encrypted ones require the associated SQLCipher
 key to access their contents.
 
+If the `encryptedKey` is itself encrypted, a dedicated tool may be
+required to obtain the usable key. One approach is to compile and run a
+community Rust utility (available on GitHub) which produces a decrypted
+key via the `signal-descriptions` binary in its `target` directory. This
+can be useful when shell based methods fail to decode the `encryptedKey`.
+
 ## Interactive mode
 
 When run without command line arguments the script will prompt for the
