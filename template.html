@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <style>
 body { font-family: DejaVuSans; font-size: 12px; }
-.message { margin-bottom: 6px; }
 .date { font-size: 6px; color: #888888; }
 .meta { color: #555555; font-size: 9px; }
 .sender { font-weight: bold; }
@@ -23,6 +22,7 @@ body { font-family: DejaVuSans; font-size: 12px; }
     <div>[Attachment: {{ msg.attachment_name }}]</div>
   {% endif %}
 </div>
+<br><br>
 {% endfor %}
 </body>
 </html>
