@@ -37,7 +37,7 @@ except ImportError:  # pragma: no cover - fallback only used when pysqlcipher3 m
     except ImportError:  # pragma: no cover - handled in open_db
         sqlite3 = None
 
-from fpdf import FPDF, HTMLMixin
+from fpdf import FPDF
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup
 from PIL import Image
@@ -103,7 +103,7 @@ def _normalize_image(path: str) -> Optional[str]:
     return None
 
 
-class PDF(FPDF, HTMLMixin):
+class PDF(FPDF):
     """FPDF class extended with HTML rendering support."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -716,11 +716,13 @@ def export_chat(
 
     # Initialize PDF document with Unicode support
     pdf = PDF()
-    if hasattr(pdf, "set_doc_option"):
+    if hasattr(pdf, "core_fonts_encoding"):
+        pdf.core_fonts_encoding = "utf-8"
+    elif hasattr(pdf, "set_doc_option"):
         pdf.set_doc_option("core_fonts_encoding", "utf-8")
     font_path = Path(__file__).parent / "dejavu-sans" / "DejaVuSans.ttf"
     ensure_font(font_path)
-    pdf.add_font("DejaVuSans", "", str(font_path), uni=True)
+    pdf.add_font("DejaVuSans", "", str(font_path))
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     pdf.set_font("DejaVuSans", size=12)
