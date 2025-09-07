@@ -49,6 +49,20 @@ try:  # optional HEIF support
 except Exception:  # pragma: no cover - dependency not available
     pass
 
+# Sanitize helper -------------------------------------------------------------
+
+def _ensure_latin1(text: str) -> str:
+    """Return ``text`` limited to latin-1 characters.
+
+    ``fpdf`` internally encodes page content using latin-1.  When chat
+    messages contain characters outside this range (for example emoji),
+    the PDF generation would otherwise raise ``UnicodeEncodeError`` when
+    writing the document.  Characters not representable in latin-1 are
+    replaced with ``?`` so the export can continue without crashing.
+    """
+
+    return text.encode("latin-1", "replace").decode("latin-1")
+
 # Work around missing HTML2FPDF.unescape attribute in fpdf
 try:
     from fpdf.html import HTML2FPDF  # type: ignore
@@ -762,6 +776,7 @@ def export_chat(
     html = template.render(conversation_label=conversation_label, messages=messages)
     html = inline_css(html, template_file.parent)
     html = rewrite_img_srcs_in_html(html)
+    html = _ensure_latin1(html)
     pdf._tmp_images.extend(_REWRITE_TMP_IMAGES)
     pdf.write_html(html)
     pdf.output(output_pdf)
