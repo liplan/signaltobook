@@ -399,6 +399,37 @@ def detect_mime_type(path: str) -> Optional[str]:
     return result
 
 
+def decode_image(path: str) -> Optional[str]:
+    """Decode image at ``path`` and ensure it has a proper extension.
+
+    The file is opened with :mod:`PIL` to verify the image. The detected
+    format determines the filename extension. The image is rewritten using
+    that extension inside the same directory. Success or error including the
+    reason is logged and the final path is returned. ``None`` indicates a
+    failure.
+    """
+
+    try:
+        with Image.open(path) as img:
+            fmt = (img.format or "").lower()
+            if not fmt:
+                raise ValueError("unknown image format")
+            ext = ".jpg" if fmt == "jpeg" else f".{fmt}"
+            dest = Path(path)
+            dest_with_ext = dest.with_suffix(ext)
+            if dest_with_ext != dest:
+                img.save(dest_with_ext, format=img.format)
+                dest.unlink(missing_ok=True)
+                dest = dest_with_ext
+            else:
+                img.save(dest, format=img.format)
+            logger.info("image=%s format=%s result=success", dest, fmt)
+            return str(dest)
+    except Exception as exc:
+        logger.error("image=%s result=error reason=%s", path, exc)
+        return None
+
+
 def _decrypt_file_key(enc_key: bytes, master_key: bytes) -> bytes:
     """Return decrypted attachment key using AES-256-CBC."""
 
@@ -438,6 +469,19 @@ def _decrypt_attachment(path: str, file_key: bytes) -> Optional[str]:
         with open(dest_path, "wb") as out:
             out.write(dec)
         mime = detect_mime_type(str(dest_path))
+        if mime and mime.startswith("image"):
+            decoded = decode_image(str(dest_path))
+            if decoded:
+                logger.info(
+                    "Decrypted attachment saved to %s (MIME: %s)",
+                    decoded,
+                    mime,
+                )
+                return decoded
+            logger.error(
+                "Decoding decrypted image %s failed", dest_path
+            )
+            return None
         logger.info(
             "Decrypted attachment saved to %s (MIME: %s)",
             dest_path,
@@ -912,7 +956,16 @@ def export_chat(
             try:
                 shutil.copy(resolved_path, dest)
                 logger.info("Copied %s to %s", resolved_path, dest)
-                resolved_path = str(dest)
+                mime = mime or detect_mime_type(str(dest))
+                if mime and mime.startswith("image"):
+                    decoded = decode_image(str(dest))
+                    if decoded:
+                        resolved_path = decoded
+                    else:
+                        missing_attachments.append(f"{attachment_path} (decode error)")
+                        resolved_path = None
+                else:
+                    resolved_path = str(dest)
             except OSError as exc:
                 logger.warning(
                     "Failed to copy %s to %s: %s", resolved_path, dest, exc
