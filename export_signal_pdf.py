@@ -99,7 +99,19 @@ def _normalize_image(path: str) -> Optional[str]:
             img.save(tmp.name, format=out_fmt)
             return tmp.name
     except Exception:
-        return None
+        # Fallback to ImageMagick via ``wand`` when Pillow cannot read the image.
+        try:
+            from wand.image import Image as WandImage  # type: ignore
+
+            with WandImage(filename=path) as img:  # pragma: no cover - dependent on wand
+                fmt = (img.format or "").upper()
+                suffix = ".jpg" if fmt in {"JPEG", "JPG"} else ".png"
+                tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+                img.format = "jpeg" if suffix == ".jpg" else "png"
+                img.save(filename=tmp.name)
+                return tmp.name
+        except Exception:
+            return None
 
     return None
 
@@ -150,7 +162,8 @@ def rewrite_img_srcs_in_html(html: str) -> str:
             return "[Unsupported image]"
         if new_src != src:
             _REWRITE_TMP_IMAGES.append(new_src)
-        return match.group(0).replace(src, new_src)
+            return match.group(0).replace(src, new_src)
+        return match.group(0)
 
     return _IMG_TAG_RE.sub(repl, html)
 

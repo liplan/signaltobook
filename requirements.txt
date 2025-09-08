@@ -4,3 +4,4 @@ pysqlcipher3
 # Alternatively, install `sqlcipher3` if you prefer a different binding.
 Pillow>=9.0
 premailer
+wand
