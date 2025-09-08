@@ -83,6 +83,16 @@ def _ensure_latin1(text: str) -> str:
 
     return text.encode("latin-1", "replace").decode("latin-1")
 
+
+def _format_enc_key(key: Any) -> str:
+    """Return a hex representation of an attachment encryption key."""
+
+    if key is None:
+        return "None"
+    if isinstance(key, (bytes, bytearray, memoryview)):
+        return bytes(key).hex()
+    return str(key)
+
 # Work around missing HTML2FPDF.unescape attribute in fpdf
 try:
     from fpdf.html import HTML2FPDF  # type: ignore
@@ -835,6 +845,13 @@ def export_chat(
     messages: List[dict] = []
 
     for date_ms, body, attachment_path, mime, enc_key, sender_flag in rows:
+        if attachment_path and mime and mime.startswith("image"):
+            logger.info(
+                "DB image metadata: path=%s mime=%s key=%s",
+                attachment_path,
+                mime,
+                _format_enc_key(enc_key),
+            )
         date_str = datetime.fromtimestamp(date_ms / 1000).strftime(
             "%Y-%m-%d %H:%M"
         )
