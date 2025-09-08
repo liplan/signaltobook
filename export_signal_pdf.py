@@ -163,7 +163,14 @@ def inline_css(html: str, base_path: Optional[Path] = None) -> str:
     rendered as text in the PDF.
     """
 
-    base_url = str(base_path.resolve()) if base_path else None
+    # ``premailer.transform`` expects ``base_url`` to include a URL scheme.
+    # :func:`Path.resolve` returns a filesystem path without one which caused
+    # ``ValueError: Base URL must have a scheme``.  ``Path.as_uri`` yields a
+    # ``file://`` URL, but it lacks a trailing slash for directories.  Adding
+    # the slash ensures that relative stylesheet paths resolve correctly.
+    base_url = (
+        base_path.resolve().as_uri().rstrip("/") + "/" if base_path else None
+    )
     inlined = transform(html, base_url=base_url)
     body_match = re.search(r"<body[^>]*>(.*)</body>", inlined, re.DOTALL | re.IGNORECASE)
     return body_match.group(1) if body_match else inlined
