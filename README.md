@@ -5,6 +5,9 @@ Database to a formatted PDF document. It can include image attachments
 and filter the exported conversation by a date range. Forwarded messages
 and other text-based attachments are included, and attachment paths are
 resolved across common Signal storage locations.
+Encrypted attachments are detected and transparently decrypted using the
+file keys stored in the database so that embedded images appear in the
+final PDF.
 
 ## Usage
 
