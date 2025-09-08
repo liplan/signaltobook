@@ -1,9 +1,11 @@
 from typing import Optional, Tuple, Dict, List
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
-import os, struct
+import os, struct, logging
 from io import BytesIO
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------
 # Basis-Funktionalität
@@ -31,15 +33,20 @@ def guess_ext(data: bytes) -> str:
     Raises:
         None.
     """
+    logger.debug("guess_ext: starting extension detection")
     for magic, ext in _MAGIC_TYPES:
         if data.startswith(magic):
             if ext == ".webp" and b"WEBP" not in data[:32]:
+                logger.debug("guess_ext: false positive webp header, continuing")
                 continue
+            logger.debug("guess_ext: matched magic %s -> %s", magic, ext)
             return ext
     return ".bin"
 
 def _try_decrypt_gcm(key: bytes, blob: bytes, nonce_len: int) -> Optional[bytes]:
+    logger.debug("_try_decrypt_gcm: attempting with nonce_len=%d", nonce_len)
     if len(blob) <= nonce_len + 16:
+        logger.debug("_try_decrypt_gcm: blob too short")
         return None
     nonce = blob[:nonce_len]
     tag = blob[-16:]
@@ -47,12 +54,16 @@ def _try_decrypt_gcm(key: bytes, blob: bytes, nonce_len: int) -> Optional[bytes]
     try:
         cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
         pt = cipher.decrypt_and_verify(ciphertext, tag)
+        logger.debug("_try_decrypt_gcm: success")
         return pt
-    except Exception:
+    except Exception as e:
+        logger.debug("_try_decrypt_gcm: failed with %s", e)
         return None
 
 def _try_decrypt_cbc(key: bytes, blob: bytes) -> Optional[bytes]:
+    logger.debug("_try_decrypt_cbc: attempting")
     if len(blob) < 16 + 1:
+        logger.debug("_try_decrypt_cbc: blob too short")
         return None
     iv = blob[:16]
     ct = blob[16:]
@@ -62,9 +73,12 @@ def _try_decrypt_cbc(key: bytes, blob: bytes) -> Optional[bytes]:
         try:
             pt = unpad(pt, 16)
         except Exception:
+            logger.debug("_try_decrypt_cbc: unpad failed, ignoring")
             pass
+        logger.debug("_try_decrypt_cbc: success")
         return pt
-    except Exception:
+    except Exception as e:
+        logger.debug("_try_decrypt_cbc: failed with %s", e)
         return None
 
 def decrypt_attachment_bytes(key: bytes, blob: bytes) -> Tuple[bytes, Dict[str, str]]:
@@ -80,18 +94,23 @@ def decrypt_attachment_bytes(key: bytes, blob: bytes) -> Tuple[bytes, Dict[str, 
     Raises:
         ValueError: If no supported decryption scheme succeeds.
     """
+    logger.debug("decrypt_attachment_bytes: starting decryption")
     pt = _try_decrypt_gcm(key, blob, 12)
     if pt is not None:
+        logger.debug("decrypt_attachment_bytes: used AES-GCM nonce 12")
         return pt, {"mode": "AES-GCM", "nonce_len": "12"}
 
     pt = _try_decrypt_gcm(key, blob, 16)
     if pt is not None:
+        logger.debug("decrypt_attachment_bytes: used AES-GCM nonce 16")
         return pt, {"mode": "AES-GCM", "nonce_len": "16"}
 
     pt = _try_decrypt_cbc(key, blob)
     if pt is not None:
+        logger.debug("decrypt_attachment_bytes: used AES-CBC fallback")
         return pt, {"mode": "AES-CBC", "note": "fallback"}
 
+    logger.debug("decrypt_attachment_bytes: all methods failed")
     raise ValueError("Decryption failed: unsupported format or wrong key.")
 
 def decrypt_attachment_file(key: bytes, in_path: str, out_path: Optional[str] = None) -> str:
@@ -109,11 +128,14 @@ def decrypt_attachment_file(key: bytes, in_path: str, out_path: Optional[str] = 
         ValueError: If decryption fails.
         OSError: If reading or writing files fails.
     """
+    logger.debug("decrypt_attachment_file: reading %s", in_path)
     with open(in_path, "rb") as f:
         blob = f.read()
     pt, info = decrypt_attachment_bytes(key, blob)
+    logger.debug("decrypt_attachment_file: decryption info %s", info)
     ext = guess_ext(pt)
     out = out_path or (in_path + ext)
+    logger.debug("decrypt_attachment_file: writing output to %s", out)
     with open(out, "wb") as w:
         w.write(pt)
     return out
@@ -129,6 +151,7 @@ _MIN_WEBP_SIZE = 24
 _MIN_MP4_SIZE = 32
 
 def _carve_jpegs(buf: bytes, out_dir: str, base: str) -> List[str]:
+    logger.debug("_carve_jpegs: scanning for JPEG fragments")
     outs = []
     i = 0
     idx = 1
@@ -152,12 +175,14 @@ def _carve_jpegs(buf: bytes, out_dir: str, base: str) -> List[str]:
         out = os.path.join(out_dir, f"{base}_{idx:02d}.jpg")
         with open(out, "wb") as w:
             w.write(fragment)
+        logger.debug("_carve_jpegs: wrote %s", out)
         outs.append(out)
         i = end
         idx += 1
     return outs
 
 def _carve_pngs(buf: bytes, out_dir: str, base: str) -> List[str]:
+    logger.debug("_carve_pngs: scanning for PNG fragments")
     outs = []
     sig = b"\x89PNG\r\n\x1a\n"
     i = 0
@@ -191,12 +216,14 @@ def _carve_pngs(buf: bytes, out_dir: str, base: str) -> List[str]:
         out = os.path.join(out_dir, f"{base}_p{idx:02d}.png")
         with open(out, "wb") as w:
             w.write(fragment)
+        logger.debug("_carve_pngs: wrote %s", out)
         outs.append(out)
         i = end
         idx += 1
     return outs
 
 def _carve_gifs(buf: bytes, out_dir: str, base: str) -> List[str]:
+    logger.debug("_carve_gifs: scanning for GIF fragments")
     outs = []
     idx = 1
     for sig in (b"GIF87a", b"GIF89a"):
@@ -221,12 +248,14 @@ def _carve_gifs(buf: bytes, out_dir: str, base: str) -> List[str]:
             out = os.path.join(out_dir, f"{base}_g{idx:02d}.gif")
             with open(out, "wb") as w:
                 w.write(fragment)
+            logger.debug("_carve_gifs: wrote %s", out)
             outs.append(out)
             i = end
             idx += 1
     return outs
 
 def _carve_webp(buf: bytes, out_dir: str, base: str) -> List[str]:
+    logger.debug("_carve_webp: scanning for WEBP fragments")
     outs = []
     i = 0
     idx = 1
@@ -253,12 +282,14 @@ def _carve_webp(buf: bytes, out_dir: str, base: str) -> List[str]:
         out = os.path.join(out_dir, f"{base}_w{idx:02d}.webp")
         with open(out, "wb") as w:
             w.write(fragment)
+        logger.debug("_carve_webp: wrote %s", out)
         outs.append(out)
         i = end
         idx += 1
     return outs
 
 def _carve_mp4(buf: bytes, out_dir: str, base: str) -> List[str]:
+    logger.debug("_carve_mp4: scanning for MP4 fragments")
     outs = []
     i = 0
     idx = 1
@@ -280,10 +311,12 @@ def _carve_mp4(buf: bytes, out_dir: str, base: str) -> List[str]:
             out = os.path.join(out_dir, f"{base}_v{idx:02d}.mp4")
             with open(out, "wb") as w:
                 w.write(fragment)
+            logger.debug("_carve_mp4: wrote %s", out)
             outs.append(out)
             i = end
             idx += 1
-        except Exception:
+        except Exception as e:
+            logger.debug("_carve_mp4: failed with %s", e)
             i = pos + 4
     return outs
 
@@ -301,6 +334,7 @@ def carve_media(plaintext: bytes, out_dir: str, base: str = "carved") -> List[st
     Raises:
         OSError: If the output directory or files cannot be created.
     """
+    logger.debug("carve_media: output dir %s base %s", out_dir, base)
     os.makedirs(out_dir, exist_ok=True)
     outputs = []
     outputs += _carve_jpegs(plaintext, out_dir, base)
@@ -308,6 +342,7 @@ def carve_media(plaintext: bytes, out_dir: str, base: str = "carved") -> List[st
     outputs += _carve_gifs(plaintext, out_dir, base)
     outputs += _carve_webp(plaintext, out_dir, base)
     outputs += _carve_mp4(plaintext, out_dir, base)
+    logger.debug("carve_media: carved %d files", len(outputs))
     return outputs
 
 def decrypt_and_carve_files(key: bytes, in_path: str, out_dir: str, base: str = "carved") -> List[str]:
@@ -326,7 +361,9 @@ def decrypt_and_carve_files(key: bytes, in_path: str, out_dir: str, base: str = 
         ValueError: If decryption fails.
         OSError: If file operations fail.
     """
+    logger.debug("decrypt_and_carve_files: reading %s", in_path)
     with open(in_path, "rb") as f:
         blob = f.read()
-    pt, _ = decrypt_attachment_bytes(key, blob)
+    pt, info = decrypt_attachment_bytes(key, blob)
+    logger.debug("decrypt_and_carve_files: decryption info %s", info)
     return carve_media(pt, out_dir, base)
