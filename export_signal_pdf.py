@@ -92,6 +92,9 @@ def _normalize_image(path: str) -> Optional[str]:
     """
 
     logger.info("Checking image %s", path)
+    if not os.path.exists(path):
+        logger.warning("Image %s does not exist", path)
+        return None
     try:
         with Image.open(path) as img:
             fmt = (img.format or "").upper()
@@ -337,6 +340,10 @@ def detect_mime_type(path: str) -> Optional[str]:
 
     import mimetypes
     import imghdr
+
+    if not os.path.exists(path):
+        logger.warning("File %s does not exist", path)
+        return None
 
     result: Optional[str] = None
     mime, _ = mimetypes.guess_type(path)
