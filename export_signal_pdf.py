@@ -47,10 +47,8 @@ from premailer import transform
 
 try:  # attachment decryption
     from Crypto.Cipher import AES  # type: ignore
-    from Crypto.Util.Padding import unpad  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
     AES = None  # type: ignore
-    unpad = None  # type: ignore
 
 try:  # optional HEIF support
     import pillow_heif  # type: ignore
@@ -442,55 +440,47 @@ def _decrypt_attachment(path: str, file_key: bytes) -> Optional[str]:
     """Decrypt attachment at ``path`` using ``file_key``.
 
     A temporary file with the decrypted content is returned or ``None`` when
-    decryption fails. Attachments are expected to have a 16 byte IV prefix.
+    decryption fails. The function relies on :mod:`signal_attachment_decrypt`
+    which supports multiple encryption schemes used by Signal.
     """
 
     logger.info("Starting decryption of attachment %s", path)
-    if AES is None or unpad is None:
-        logger.warning("PyCryptodome is required for attachment decryption")
-        return None
     try:
-        with open(path, "rb") as fh:
-            iv = fh.read(16)
-            data = fh.read()
-        cipher = AES.new(file_key, AES.MODE_CBC, iv)
-        logger.info("Using IV %s", iv.hex())
-        dec = cipher.decrypt(data)
-        try:
-            dec = unpad(dec, AES.block_size)
-        except ValueError:
-            logger.info("Data for %s not padded", path)
-        images_dir = Path("images")
-        images_dir.mkdir(exist_ok=True)
-        name = Path(path).name
-        if name.endswith(".enc"):
-            name = name[:-4]
-        dest_path = images_dir / name
-        with open(dest_path, "wb") as out:
-            out.write(dec)
-        mime = detect_mime_type(str(dest_path))
-        if mime and mime.startswith("image"):
-            decoded = decode_image(str(dest_path))
-            if decoded:
-                logger.info(
-                    "Decrypted attachment saved to %s (MIME: %s)",
-                    decoded,
-                    mime,
-                )
-                return decoded
-            logger.error(
-                "Decoding decrypted image %s failed", dest_path
-            )
-            return None
-        logger.info(
-            "Decrypted attachment saved to %s (MIME: %s)",
-            dest_path,
-            mime or "unknown",
-        )
-        return str(dest_path)
+        from signal_attachment_decrypt import decrypt_attachment_file
+
+        tmp_path = decrypt_attachment_file(file_key, path)
     except Exception:
         logger.warning("Failed to decrypt attachment %s", path)
         return None
+
+    images_dir = Path("images")
+    images_dir.mkdir(exist_ok=True)
+    dest_path = images_dir / Path(tmp_path).name
+    try:
+        shutil.move(tmp_path, dest_path)
+    except OSError:
+        logger.warning("Failed to move decrypted attachment %s", tmp_path)
+        return None
+
+    mime = detect_mime_type(str(dest_path))
+    if mime and mime.startswith("image"):
+        decoded = decode_image(str(dest_path))
+        if decoded:
+            logger.info(
+                "Decrypted attachment saved to %s (MIME: %s)",
+                decoded,
+                mime,
+            )
+            return decoded
+        logger.error("Decoding decrypted image %s failed", dest_path)
+        return None
+
+    logger.info(
+        "Decrypted attachment saved to %s (MIME: %s)",
+        dest_path,
+        mime or "unknown",
+    )
+    return str(dest_path)
 
 
 def is_outgoing(flag: Any) -> bool:
