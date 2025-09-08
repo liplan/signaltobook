@@ -46,6 +46,8 @@ h1 {
   <div class="text">{{ msg.text }}</div>
   {% if msg.attachment and msg.mime and msg.mime.startswith('image') %}
     <img src="{{ msg.attachment }}" width="100">
+  {% elif msg.attachment and msg.mime and msg.mime.startswith('audio') %}
+    <div>[Voice message: {{ msg.attachment_name }}]</div>
   {% elif msg.attachment %}
     <div>[Attachment: {{ msg.attachment_name }}]</div>
   {% endif %}
