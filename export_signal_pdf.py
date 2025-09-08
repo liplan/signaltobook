@@ -429,11 +429,28 @@ def decode_image(path: str) -> Optional[str]:
 
 
 def _decrypt_file_key(enc_key: bytes, master_key: bytes) -> bytes:
-    """Return decrypted attachment key using AES-256-CBC."""
+    """Return decrypted attachment key.
 
-    iv = enc_key[:16]
-    cipher = AES.new(master_key, AES.MODE_CBC, iv)
-    return cipher.decrypt(enc_key[16:])
+    Newer Signal databases encode the file key using AES-256-GCM where the
+    first 12 bytes represent the nonce and the last 16 bytes the tag.  Older
+    versions used AES-256-CBC with a 16 byte IV prefix.  This helper tries the
+    modern GCM scheme first and falls back to the legacy CBC method for
+    compatibility with exported databases from older Signal versions.
+    """
+
+    # Prefer the current AES-GCM based wrapping.  If decryption or validation
+    # fails we fall back to the historic CBC variant below.
+    try:
+        nonce = enc_key[:12]
+        tag = enc_key[-16:]
+        cipher_text = enc_key[12:-16]
+        cipher = AES.new(master_key, AES.MODE_GCM, nonce=nonce)
+        plain = cipher.decrypt_and_verify(cipher_text, tag)
+        return plain[:32]
+    except Exception:
+        iv = enc_key[:16]
+        cipher = AES.new(master_key, AES.MODE_CBC, iv)
+        return cipher.decrypt(enc_key[16:])
 
 
 def _decrypt_attachment(path: str, file_key: bytes) -> Optional[str]:
