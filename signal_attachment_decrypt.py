@@ -2,6 +2,8 @@ from typing import Optional, Tuple, Dict, List
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 import os, struct
+from io import BytesIO
+from PIL import Image
 
 # ---------------------------
 # Basis-Funktionalität
@@ -83,6 +85,12 @@ def decrypt_attachment_file(key: bytes, in_path: str, out_path: Optional[str] = 
 # Carving Utilities (Fallback)
 # ---------------------------
 
+_MIN_JPEG_SIZE = 100
+_MIN_PNG_SIZE = 32
+_MIN_GIF_SIZE = 32
+_MIN_WEBP_SIZE = 24
+_MIN_MP4_SIZE = 32
+
 def _carve_jpegs(buf: bytes, out_dir: str, base: str) -> List[str]:
     outs = []
     i = 0
@@ -95,9 +103,18 @@ def _carve_jpegs(buf: bytes, out_dir: str, base: str) -> List[str]:
         if end == -1:
             break
         end += 2
+        fragment = buf[start:end]
+        if len(fragment) < _MIN_JPEG_SIZE:
+            i = end
+            continue
+        try:
+            Image.open(BytesIO(fragment)).verify()
+        except Exception:
+            i = end
+            continue
         out = os.path.join(out_dir, f"{base}_{idx:02d}.jpg")
         with open(out, "wb") as w:
-            w.write(buf[start:end])
+            w.write(fragment)
         outs.append(out)
         i = end
         idx += 1
@@ -123,9 +140,20 @@ def _carve_pngs(buf: bytes, out_dir: str, base: str) -> List[str]:
                 end = iend + 8
         else:
             end = iend + 8
+        if end > len(buf):
+            break
+        fragment = buf[start:end]
+        if len(fragment) < _MIN_PNG_SIZE:
+            i = end
+            continue
+        try:
+            Image.open(BytesIO(fragment)).verify()
+        except Exception:
+            i = end
+            continue
         out = os.path.join(out_dir, f"{base}_p{idx:02d}.png")
         with open(out, "wb") as w:
-            w.write(buf[start:end])
+            w.write(fragment)
         outs.append(out)
         i = end
         idx += 1
@@ -144,9 +172,18 @@ def _carve_gifs(buf: bytes, out_dir: str, base: str) -> List[str]:
             if end == -1:
                 break
             end += 1
+            fragment = buf[start:end]
+            if len(fragment) < _MIN_GIF_SIZE:
+                i = end
+                continue
+            try:
+                Image.open(BytesIO(fragment)).verify()
+            except Exception:
+                i = end
+                continue
             out = os.path.join(out_dir, f"{base}_g{idx:02d}.gif")
             with open(out, "wb") as w:
-                w.write(buf[start:end])
+                w.write(fragment)
             outs.append(out)
             i = end
             idx += 1
@@ -163,14 +200,22 @@ def _carve_webp(buf: bytes, out_dir: str, base: str) -> List[str]:
         if buf[start+8:start+12] != b"WEBP":
             i = start + 4
             continue
-        if start + 8 + 4 > len(buf):
+        if start + 12 > len(buf):
             break
         size = struct.unpack("<I", buf[start+4:start+8])[0]
         end = start + 8 + size
-        end = min(end, len(buf))
+        if end > len(buf) or size < _MIN_WEBP_SIZE:
+            i = start + 4
+            continue
+        fragment = buf[start:end]
+        try:
+            Image.open(BytesIO(fragment)).verify()
+        except Exception:
+            i = end
+            continue
         out = os.path.join(out_dir, f"{base}_w{idx:02d}.webp")
         with open(out, "wb") as w:
-            w.write(buf[start:end])
+            w.write(fragment)
         outs.append(out)
         i = end
         idx += 1
@@ -187,13 +232,17 @@ def _carve_mp4(buf: bytes, out_dir: str, base: str) -> List[str]:
         start = pos - 4
         try:
             size = struct.unpack(">I", buf[start:start+4])[0]
-            if size < 20 or start + size > len(buf):
+            if size < _MIN_MP4_SIZE or start + size > len(buf):
+                i = pos + 4
+                continue
+            fragment = buf[start:start+size]
+            if b"moov" not in fragment and b"mdat" not in fragment:
                 i = pos + 4
                 continue
             end = start + size
             out = os.path.join(out_dir, f"{base}_v{idx:02d}.mp4")
             with open(out, "wb") as w:
-                w.write(buf[start:end])
+                w.write(fragment)
             outs.append(out)
             i = end
             idx += 1
