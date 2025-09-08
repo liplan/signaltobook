@@ -14,12 +14,11 @@ after the PDF is generated.
 
 ## Usage
 
+Run the script without command line arguments and follow the prompts to
+select the database, conversation, date range, and output file:
+
 ```
-python export_signal_pdf.py --db path/to/signal.db \
-                            --conversation 1 \
-                            --start 2020-12-01 \
-                            --end 2020-12-24 \
-                            --output chat.pdf
+python export_signal_pdf.py
 ```
 
 The script relies on SQLCipher-enabled Python bindings such as
@@ -35,9 +34,9 @@ uses the `DejaVuSans` TrueType font bundled in the repository under
 
 The PDF layout can be customized using an HTML template rendered via
 `Jinja2` and converted to PDF with `fpdf2`'s HTML capabilities. Edit the
-provided `template.html` or supply your own template file using the
-`--template` command-line option to adjust fonts, colors, or other layout
-details. Styles from `<style>` blocks and linked stylesheets are now inlined
+provided `template.html` or replace it with your own file to adjust fonts,
+colors, or other layout details. Styles from `<style>` blocks and linked
+stylesheets are now inlined
 using [`premailer`](https://pypi.org/project/premailer/), which supports a
 broader range of CSS selectors (e.g. combined classes or descendant
 selectors) so that template changes are reflected in the generated PDF.

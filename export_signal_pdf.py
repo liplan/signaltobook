@@ -8,19 +8,14 @@ specific conversation and optionally embeds image attachments.  Messages are
 filtered by a date range, for example from 1 December 2020 to
 24 December 2020.
 
-Usage:
-    python export_signal_pdf.py --db path/to/signal.db \
-                                --conversation 1 \
-                                --start 2020-12-01 \
-                                --end 2020-12-24 \
-                                --output chat.pdf
+Run the script without arguments and follow the interactive prompts to
+select the database, conversation, date range, and output filename.
 
 The database schema can differ depending on the Signal version.  The SQL
 query in this script targets the common tables `messages` and
 `attachments`.  Adjust the query if your schema deviates.
 """
 
-import argparse
 import json
 import os
 import re
@@ -1020,27 +1015,10 @@ def export_chat(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Export Signal chat to PDF")
-    parser.add_argument("--db", help="Path to Signal SQLite DB")
-    parser.add_argument(
-        "--conversation",
-        help="Conversation identifier as listed in the 'conversations' table",
-    )
-    parser.add_argument("--start", help="Start date YYYY-MM-DD")
-    parser.add_argument("--end", help="End date YYYY-MM-DD")
-    parser.add_argument("--output", help="Path to the output PDF file")
-    parser.add_argument("--template", help="Path to HTML template for styling")
-    parser.add_argument(
-        "--attachments",
-        help="Additional directory to search for attachments",
-    )
-
-    args = parser.parse_args()
-
     config = load_config()
 
     db_prompt = f"Path to Signal SQLite DB [{config.get('db_path', '')}]: "
-    db_path = args.db or input(db_prompt).strip() or config.get("db_path")
+    db_path = input(db_prompt).strip() or config.get("db_path")
     if not db_path:
         fail("Path to Signal SQLite DB is required.")
     confirm_db_connection(db_path, DB_KEY_HEX)
@@ -1049,63 +1027,55 @@ if __name__ == "__main__":
     conv_lookup = {cid: label for cid, label in conversations}
 
     while True:
-        if args.conversation:
-            conversation_id = args.conversation
-            conversation_label = conv_lookup.get(conversation_id, conversation_id)
-        else:
-            print("Available conversations:")
-            for idx, (cid, label) in enumerate(conversations, 1):
-                display = f"{label} ({cid})" if label != cid else cid
-                print(f"{idx}: {display}")
-            prev_id = config.get("conversation_id")
-            default_idx = next(
-                (i for i, (cid, _label) in enumerate(conversations, 1) if cid == prev_id),
-                None,
-            )
-            while True:
-                prompt = "Select conversation number"
-                if default_idx:
-                    prompt += f" [{default_idx}]"
-                choice = input(prompt + ": ").strip()
-                if not choice and default_idx:
-                    conversation_id = conversations[default_idx - 1][0]
-                    break
-                if choice.isdigit() and 1 <= int(choice) <= len(conversations):
-                    conversation_id = conversations[int(choice) - 1][0]
-                    break
-                print("Please enter a valid number.")
-            conversation_label = conv_lookup.get(conversation_id, conversation_id)
+        print("Available conversations:")
+        for idx, (cid, label) in enumerate(conversations, 1):
+            display = f"{label} ({cid})" if label != cid else cid
+            print(f"{idx}: {display}")
+        prev_id = config.get("conversation_id")
+        default_idx = next(
+            (i for i, (cid, _label) in enumerate(conversations, 1) if cid == prev_id),
+            None,
+        )
+        while True:
+            prompt = "Select conversation number"
+            if default_idx:
+                prompt += f" [{default_idx}]"
+            choice = input(prompt + ": ").strip()
+            if not choice and default_idx:
+                conversation_id = conversations[default_idx - 1][0]
+                break
+            if choice.isdigit() and 1 <= int(choice) <= len(conversations):
+                conversation_id = conversations[int(choice) - 1][0]
+                break
+            print("Please enter a valid number.")
+        conversation_label = conv_lookup.get(conversation_id, conversation_id)
 
-        if args.start and args.end:
-            start_date, end_date = args.start, args.end
-        else:
-            start_default = config.get("start_date", "")
-            end_default = config.get("end_date", "")
-            while True:
-                prompt = "Date range (YYYY-MM-DD YYYY-MM-DD)"
-                if start_default and end_default:
-                    prompt += f" [{start_default} {end_default}]"
-                raw = input(prompt + ": ").strip()
-                if not raw and start_default and end_default:
-                    start_date, end_date = start_default, end_default
+        start_default = config.get("start_date", "")
+        end_default = config.get("end_date", "")
+        while True:
+            prompt = "Date range (YYYY-MM-DD YYYY-MM-DD)"
+            if start_default and end_default:
+                prompt += f" [{start_default} {end_default}]"
+            raw = input(prompt + ": ").strip()
+            if not raw and start_default and end_default:
+                start_date, end_date = start_default, end_default
+                break
+            date_range = raw.split()
+            if len(date_range) == 2:
+                start_date, end_date = date_range
+                try:
+                    datetime.strptime(start_date, "%Y-%m-%d")
+                    datetime.strptime(end_date, "%Y-%m-%d")
                     break
-                date_range = raw.split()
-                if len(date_range) == 2:
-                    start_date, end_date = date_range
-                    try:
-                        datetime.strptime(start_date, "%Y-%m-%d")
-                        datetime.strptime(end_date, "%Y-%m-%d")
-                        break
-                    except ValueError:
-                        pass
-                print("Please provide valid dates separated by space.")
+                except ValueError:
+                    pass
+            print("Please provide valid dates separated by space.")
 
         suggested_output = config.get(
             "output_pdf", f"chat_{start_date}_{end_date}.pdf"
         )
         output_pdf = (
-            args.output
-            or input(f"Output PDF filename [{suggested_output}]: ").strip()
+            input(f"Output PDF filename [{suggested_output}]: ").strip()
             or suggested_output
         )
 
@@ -1117,8 +1087,8 @@ if __name__ == "__main__":
             end_date,
             output_pdf,
             DB_KEY_HEX,
-            args.template,
-            args.attachments,
+            None,
+            None,
         ):
             config.update(
                 {
@@ -1134,4 +1104,3 @@ if __name__ == "__main__":
             break
 
         print("Please choose a different conversation or date range.")
-        args.conversation = args.start = args.end = args.output = None
