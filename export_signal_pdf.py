@@ -948,7 +948,7 @@ def export_chat(
         else:
             logger.info("Attachment %s is not encrypted", attachment_path)
 
-        if resolved_path and file_key:
+        if resolved_path and decrypt_attachment_file:
             decrypted = _decrypt_attachment(resolved_path, file_key)
             if decrypted:
                 logger.info("Decryption succeeded for %s", resolved_path)
