@@ -189,6 +189,7 @@ ATTACHMENT_SEARCH_DIRS = [
     Path.home() / ".local/share/Signal/attachments.noindex",
     Path.home() / ".local/share/signal-desktop/attachments.noindex",
     Path.home() / "Library/Application Support/Signal/attachments.noindex",
+    Path.home() / "Library/ApplicationSupport/Signal/attachments.noindex",
     Path.home() / "AppData/Roaming/Signal/attachments.noindex",
 ]
 
