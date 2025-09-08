@@ -25,6 +25,7 @@ import json
 import os
 import re
 import tempfile
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Optional, Any
@@ -49,6 +50,13 @@ try:  # optional HEIF support
     pillow_heif.register_heif_opener()  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover - dependency not available
     pass
+
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _handler = logging.FileHandler("image_analysis.log", encoding="utf-8")
+    _handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
+    logger.addHandler(_handler)
+logger.setLevel(logging.INFO)
 
 # Sanitize helper -------------------------------------------------------------
 
@@ -83,6 +91,7 @@ def _normalize_image(path: str) -> Optional[str]:
     are converted to a temporary PNG/JPEG file to ensure compatibility.
     """
 
+    logger.info("Checking image %s", path)
     try:
         with Image.open(path) as img:
             fmt = (img.format or "").upper()
@@ -90,6 +99,7 @@ def _normalize_image(path: str) -> Optional[str]:
             # Accept common formats only when they already have a proper
             # extension.  Otherwise convert to a temp file with one.
             if fmt in {"PNG", "JPEG", "JPG"} and ext in {".png", ".jpg", ".jpeg"}:
+                logger.info("Image %s supported without conversion", path)
                 return path
 
             # Convert everything else to PNG except JPEG which keeps its format
@@ -97,6 +107,7 @@ def _normalize_image(path: str) -> Optional[str]:
             tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
             out_fmt = "JPEG" if suffix == ".jpg" else "PNG"
             img.save(tmp.name, format=out_fmt)
+            logger.info("Converted %s to %s", path, tmp.name)
             return tmp.name
     except Exception:
         # Fallback to ImageMagick via ``wand`` when Pillow cannot read the image.
@@ -109,10 +120,13 @@ def _normalize_image(path: str) -> Optional[str]:
                 tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
                 img.format = "jpeg" if suffix == ".jpg" else "png"
                 img.save(filename=tmp.name)
+                logger.info("Converted %s to %s via wand", path, tmp.name)
                 return tmp.name
         except Exception:
+            logger.warning("Unsupported image %s", path)
             return None
 
+    logger.warning("Unsupported image %s", path)
     return None
 
 
@@ -324,32 +338,35 @@ def detect_mime_type(path: str) -> Optional[str]:
     import mimetypes
     import imghdr
 
+    result: Optional[str] = None
     mime, _ = mimetypes.guess_type(path)
     if mime:
-        return mime
+        result = mime
+    else:
+        try:
+            img = imghdr.what(path)
+            if img:
+                result = f"image/{img}"
+        except Exception:
+            pass
+        if not result:
+            try:
+                with open(path, "rb") as fh:
+                    header = fh.read(12)
+                if header.startswith(b"RIFF") and header[8:12] == b"WAVE":
+                    result = "audio/wav"
+                elif header.startswith(b"ID3") or header[:2] == b"\xff\xfb":
+                    result = "audio/mpeg"
+                elif header.startswith(b"OggS"):
+                    result = "audio/ogg"
+                elif header.startswith(b"fLaC"):
+                    result = "audio/flac"
+            except OSError:
+                logger.warning("Failed to read %s for MIME detection", path)
+                return None
 
-    try:
-        img = imghdr.what(path)
-        if img:
-            return f"image/{img}"
-    except Exception:
-        pass
-
-    try:
-        with open(path, "rb") as fh:
-            header = fh.read(12)
-        if header.startswith(b"RIFF") and header[8:12] == b"WAVE":
-            return "audio/wav"
-        if header.startswith(b"ID3") or header[:2] == b"\xff\xfb":
-            return "audio/mpeg"
-        if header.startswith(b"OggS"):
-            return "audio/ogg"
-        if header.startswith(b"fLaC"):
-            return "audio/flac"
-    except OSError:
-        return None
-
-    return None
+    logger.info("MIME detection for %s: %s", path, result or "unknown")
+    return result
 
 
 def is_outgoing(flag: Any) -> bool:
