@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple, Iterable
 
+from signal_attachment_decrypt import decrypt_attachment_file
+
 try:
     from Crypto.Cipher import AES  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
@@ -59,23 +61,14 @@ def decrypt_file_key(enc_key: bytes, master_key: bytes) -> Tuple[bytes, bytes]:
 
 
 def decrypt_attachment(src: Path, key: bytes, iv: bytes, dest: Path) -> None:
-    """Decrypt ``src`` to ``dest`` using AES-256-GCM streaming."""
+    """Decrypt ``src`` to ``dest`` using :mod:`signal_attachment_decrypt`.
 
-    if AES is None:
-        raise RuntimeError("PyCryptodome is required for attachment decryption")
-    cipher = AES.new(key, AES.MODE_GCM, nonce=iv)
-    size = src.stat().st_size
-    tag_pos = size - 16
-    with src.open("rb") as fh, dest.open("wb") as out:
-        processed = 0
-        while processed < tag_pos:
-            chunk = fh.read(min(4096, tag_pos - processed))
-            if not chunk:
-                break
-            out.write(cipher.decrypt(chunk))
-            processed += len(chunk)
-        tag = fh.read(16)
-    cipher.verify(tag)
+    The ``iv`` parameter is accepted for backward compatibility but ignored,
+    as :func:`signal_attachment_decrypt.decrypt_attachment_file` expects the
+    nonce to be part of the encrypted file.
+    """
+
+    decrypt_attachment_file(key, str(src), str(dest))
 
 
 def fetch_attachment_rows(conn) -> Iterable[tuple]:
