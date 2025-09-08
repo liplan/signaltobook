@@ -20,6 +20,17 @@ _MAGIC_TYPES = [
 ]
 
 def guess_ext(data: bytes) -> str:
+    """Guess file extension by inspecting the header.
+
+    Parameters:
+        data: Bytes of the decoded attachment.
+
+    Returns:
+        Matching extension including the leading dot, or ``".bin"`` if unknown.
+
+    Raises:
+        None.
+    """
     for magic, ext in _MAGIC_TYPES:
         if data.startswith(magic):
             if ext == ".webp" and b"WEBP" not in data[:32]:
@@ -57,6 +68,18 @@ def _try_decrypt_cbc(key: bytes, blob: bytes) -> Optional[bytes]:
         return None
 
 def decrypt_attachment_bytes(key: bytes, blob: bytes) -> Tuple[bytes, Dict[str, str]]:
+    """Decrypt an attachment blob using various AES modes.
+
+    Parameters:
+        key: Raw 32‑byte AES key.
+        blob: Encrypted attachment bytes.
+
+    Returns:
+        Tuple of plaintext bytes and metadata about the mode used.
+
+    Raises:
+        ValueError: If no supported decryption scheme succeeds.
+    """
     pt = _try_decrypt_gcm(key, blob, 12)
     if pt is not None:
         return pt, {"mode": "AES-GCM", "nonce_len": "12"}
@@ -72,6 +95,20 @@ def decrypt_attachment_bytes(key: bytes, blob: bytes) -> Tuple[bytes, Dict[str, 
     raise ValueError("Decryption failed: unsupported format or wrong key.")
 
 def decrypt_attachment_file(key: bytes, in_path: str, out_path: Optional[str] = None) -> str:
+    """Decrypt an attachment file and write the plaintext to disk.
+
+    Parameters:
+        key: Raw 32‑byte AES key.
+        in_path: Path to the encrypted file.
+        out_path: Optional output path; defaults to ``in_path`` with guessed extension.
+
+    Returns:
+        Path to the written plaintext file.
+
+    Raises:
+        ValueError: If decryption fails.
+        OSError: If reading or writing files fails.
+    """
     with open(in_path, "rb") as f:
         blob = f.read()
     pt, info = decrypt_attachment_bytes(key, blob)
@@ -251,6 +288,19 @@ def _carve_mp4(buf: bytes, out_dir: str, base: str) -> List[str]:
     return outs
 
 def carve_media(plaintext: bytes, out_dir: str, base: str = "carved") -> List[str]:
+    """Extract media fragments from raw bytes and store them as files.
+
+    Parameters:
+        plaintext: Bytes to scan for embedded media.
+        out_dir: Directory where carved files are written.
+        base: Base filename used when generating output names.
+
+    Returns:
+        List of paths to carved media files.
+
+    Raises:
+        OSError: If the output directory or files cannot be created.
+    """
     os.makedirs(out_dir, exist_ok=True)
     outputs = []
     outputs += _carve_jpegs(plaintext, out_dir, base)
@@ -261,6 +311,21 @@ def carve_media(plaintext: bytes, out_dir: str, base: str = "carved") -> List[st
     return outputs
 
 def decrypt_and_carve_files(key: bytes, in_path: str, out_dir: str, base: str = "carved") -> List[str]:
+    """Decrypt an attachment file and carve embedded media from it.
+
+    Parameters:
+        key: Raw 32‑byte AES key.
+        in_path: Path to the encrypted attachment.
+        out_dir: Directory where carved files are written.
+        base: Base filename used when generating output names.
+
+    Returns:
+        List of paths to carved media files.
+
+    Raises:
+        ValueError: If decryption fails.
+        OSError: If file operations fail.
+    """
     with open(in_path, "rb") as f:
         blob = f.read()
     pt, _ = decrypt_attachment_bytes(key, blob)
