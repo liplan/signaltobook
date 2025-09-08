@@ -20,6 +20,7 @@ h1 {
 
 .date {
   font-size: 8px;       /* kleiner als Haupttext */
+  color: #888888;
   display: block;
   margin-bottom: 2px;
 }
@@ -27,6 +28,7 @@ h1 {
 .sender {
   font-weight: bold;    /* fett */
   margin-left: 4px;
+  color: #0055ff;
 }
 
 .text { 
@@ -39,9 +41,9 @@ h1 {
 <body>
 <h1>{{ conversation_label }}</h1>
 {% for msg in messages %}
-<p class="message">
+<div class="message">
   <div class="date">
-    <font color="#888888">{{ msg.date }}</font> <font color="#0055ff"><span class="sender">{{ msg.sender }}</span></font>
+    {{ msg.date }} <span class="sender">{{ msg.sender }}</span>
   </div>
   <div class="text">{{ msg.text }}</div>
   {% if msg.attachment and msg.mime and msg.mime.startswith('image') %}
@@ -51,7 +53,7 @@ h1 {
   {% elif msg.attachment %}
     <div>[Attachment: {{ msg.attachment_name }}]</div>
   {% endif %}
-</p>
+</div>
 {% endfor %}
 </body>
 </html>
