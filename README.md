@@ -8,6 +8,9 @@ resolved across common Signal storage locations.
 Encrypted attachments are detected and transparently decrypted using the
 file keys stored in the database so that embedded images appear in the
 final PDF.
+Unencrypted attachments are copied into a temporary `images/` directory
+so that they can be referenced by the HTML template. These copies are
+removed after the PDF is generated.
 
 ## Usage
 
