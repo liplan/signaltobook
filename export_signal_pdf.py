@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import tempfile
 import logging
 from datetime import datetime
@@ -861,6 +862,17 @@ def export_chat(
             else:
                 missing_attachments.append(f"{attachment_path} (decrypt error)")
                 resolved_path = None
+        elif resolved_path:
+            images_dir = Path("images")
+            images_dir.mkdir(exist_ok=True)
+            dest = images_dir / Path(resolved_path).name
+            try:
+                shutil.copy(resolved_path, dest)
+                tmp_files.append(str(dest))
+                resolved_path = str(dest)
+            except OSError:
+                missing_attachments.append(f"{attachment_path} (copy error)")
+                resolved_path = None
 
         if resolved_path and not mime:
             mime = detect_mime_type(resolved_path)
@@ -915,6 +927,12 @@ def export_chat(
             os.remove(fp)
         except OSError:
             pass
+
+    images_dir = Path("images")
+    try:
+        images_dir.rmdir()
+    except OSError:
+        pass
 
     if missing_attachments:
         print("⚠️ Some image attachments could not be embedded:")
