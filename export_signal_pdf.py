@@ -63,6 +63,9 @@ if not logger.handlers:
     _handler = logging.FileHandler("image_analysis.log", encoding="utf-8")
     _handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
     logger.addHandler(_handler)
+    _console = logging.StreamHandler()
+    _console.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
+    logger.addHandler(_console)
 logger.setLevel(logging.INFO)
 
 # Sanitize helper -------------------------------------------------------------
@@ -398,6 +401,7 @@ def _decrypt_attachment(path: str, file_key: bytes) -> Optional[str]:
     decryption fails. Attachments are expected to have a 16 byte IV prefix.
     """
 
+    logger.info("Starting decryption of attachment %s", path)
     if AES is None or unpad is None:
         logger.warning("PyCryptodome is required for attachment decryption")
         return None
@@ -406,15 +410,27 @@ def _decrypt_attachment(path: str, file_key: bytes) -> Optional[str]:
             iv = fh.read(16)
             data = fh.read()
         cipher = AES.new(file_key, AES.MODE_CBC, iv)
+        logger.info("Using IV %s", iv.hex())
         dec = cipher.decrypt(data)
         try:
             dec = unpad(dec, AES.block_size)
         except ValueError:
-            pass
-        tmp = tempfile.NamedTemporaryFile(delete=False)
-        tmp.write(dec)
-        tmp.close()
-        return tmp.name
+            logger.info("Data for %s not padded", path)
+        images_dir = Path("images")
+        images_dir.mkdir(exist_ok=True)
+        name = Path(path).name
+        if name.endswith(".enc"):
+            name = name[:-4]
+        dest_path = images_dir / name
+        with open(dest_path, "wb") as out:
+            out.write(dec)
+        mime = detect_mime_type(str(dest_path))
+        logger.info(
+            "Decrypted attachment saved to %s (MIME: %s)",
+            dest_path,
+            mime or "unknown",
+        )
+        return str(dest_path)
     except Exception:
         logger.warning("Failed to decrypt attachment %s", path)
         return None
@@ -841,7 +857,6 @@ def export_chat(
         if resolved_path and file_key:
             decrypted = _decrypt_attachment(resolved_path, file_key)
             if decrypted:
-                tmp_files.append(decrypted)
                 resolved_path = decrypted
             else:
                 missing_attachments.append(f"{attachment_path} (decrypt error)")
