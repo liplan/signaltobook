@@ -259,32 +259,44 @@ def sanitize_text(text: str, pdf: FPDF) -> str:
     return text
 
 
-def resolve_attachment_path(raw_path: Optional[str]) -> Optional[str]:
+def resolve_attachment_path(
+    raw_path: Optional[str], extra_dir: Optional[str] = None
+) -> Optional[str]:
     """Return an existing filesystem path for ``raw_path``.
 
     Signal stores attachments in different base directories depending on the
-    platform and version.  The database may only hold a partial path or
-    filename.  This helper checks several common directories and returns the
-    first matching file or ``None`` when the attachment cannot be located.
+    platform and version. The database may only hold a partial path or
+    filename. This helper checks several common directories, optionally an
+    additional user-supplied directory, and returns the first matching file or
+    ``None`` when the attachment cannot be located. If a direct lookup fails,
+    the directories are searched recursively for a matching filename.
     """
 
     if not raw_path:
         return None
 
     path = Path(raw_path)
-    candidates = [path]
-    # Also try just the filename in case only the hash is stored
-    candidates.append(Path(path.name))
+    candidates = [path, Path(path.name)]
+
+    search_dirs = ATTACHMENT_SEARCH_DIRS.copy()
+    if extra_dir:
+        search_dirs.insert(0, Path(extra_dir))
 
     for cand in candidates:
         if cand.exists():
             return str(cand)
 
-    for base in ATTACHMENT_SEARCH_DIRS:
+    for base in search_dirs:
         for cand in candidates:
             candidate = base / cand
             if candidate.exists():
                 return str(candidate)
+            if base.is_dir():
+                try:
+                    match = next(base.rglob(cand.name))
+                    return str(match)
+                except StopIteration:
+                    pass
     return None
 
 
@@ -566,6 +578,7 @@ def export_chat(
     output_pdf: str,
     key_hex: str,
     template_path: Optional[str] = None,
+    attachments_dir: Optional[str] = None,
 ) -> bool:
     """Export messages from ``conversation_id`` between ``start_date`` and ``end_date``.
 
@@ -585,6 +598,8 @@ def export_chat(
         Path to the generated PDF file.
     key_hex: str
         Database key in hex format.
+    attachments_dir: Optional[str]
+        Additional base directory to search for attachments.
 
     Returns
     -------
@@ -682,7 +697,9 @@ def export_chat(
         )
 
         resolved_path = (
-            resolve_attachment_path(attachment_path) if attachment_path else None
+            resolve_attachment_path(attachment_path, attachments_dir)
+            if attachment_path
+            else None
         )
 
         if resolved_path and mime and mime.startswith("text"):
@@ -749,6 +766,10 @@ if __name__ == "__main__":
     parser.add_argument("--end", help="End date YYYY-MM-DD")
     parser.add_argument("--output", help="Path to the output PDF file")
     parser.add_argument("--template", help="Path to HTML template for styling")
+    parser.add_argument(
+        "--attachments",
+        help="Additional directory to search for attachments",
+    )
 
     args = parser.parse_args()
 
@@ -833,6 +854,7 @@ if __name__ == "__main__":
             output_pdf,
             DB_KEY_HEX,
             args.template,
+            args.attachments,
         ):
             config.update(
                 {
