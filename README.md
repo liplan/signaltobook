@@ -31,9 +31,10 @@ The PDF layout can be customized using an HTML template rendered via
 `Jinja2` and converted to PDF with `fpdf2`'s HTML capabilities. Edit the
 provided `template.html` or supply your own template file using the
 `--template` command-line option to adjust fonts, colors, or other layout
-details. Styles defined in a `<style>` block using simple selectors (e.g.
-body or `.message`) are automatically converted to inline styles so they
-render correctly in the PDF.
+details. Styles from `<style>` blocks and linked stylesheets are now inlined
+using [`premailer`](https://pypi.org/project/premailer/), which supports a
+broader range of CSS selectors (e.g. combined classes or descendant
+selectors) so that template changes are reflected in the generated PDF.
 
 If the `encryptedKey` is itself encrypted, a dedicated tool may be
 required to obtain the usable key. One approach is to compile and run a

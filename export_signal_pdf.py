@@ -41,6 +41,7 @@ from fpdf import FPDF
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup
 from PIL import Image
+from premailer import transform
 
 try:  # optional HEIF support
     import pillow_heif  # type: ignore
@@ -155,80 +156,17 @@ def rewrite_img_srcs_in_html(html: str) -> str:
 
 
 def inline_css(html: str, base_path: Optional[Path] = None) -> str:
-    """Convert simple CSS rules to inline styles and strip stylesheet definitions.
+    """Inline CSS rules using :mod:`premailer` for broader selector support.
 
-    ``base_path`` specifies where linked stylesheets are located. Only very
-    basic selectors are supported: ``body`` and single-class selectors like
-    ``.message``. The resulting string contains only the body content so that
-    style definitions are not rendered as text in the PDF.
+    ``base_path`` specifies where linked stylesheets are located. The resulting
+    string contains only the body content so that style definitions are not
+    rendered as text in the PDF.
     """
 
-    css_blocks: List[str] = []
-
-    # Extract embedded ``<style>`` blocks
-    for style_match in re.findall(
-        r"<style[^>]*>(.*?)</style>", html, re.DOTALL | re.IGNORECASE
-    ):
-        css_blocks.append(style_match)
-    html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
-
-    # Resolve linked stylesheets
-    if base_path is not None:
-        for href in re.findall(
-            r"<link[^>]+rel=['\"]stylesheet['\"][^>]+href=['\"]([^'\"]+)['\"][^>]*>",
-            html,
-            flags=re.IGNORECASE,
-        ):
-            css_file = (base_path / href).resolve()
-            try:
-                css_blocks.append(css_file.read_text(encoding="utf-8"))
-            except OSError:
-                pass
-        html = re.sub(
-            r"<link[^>]+rel=['\"]stylesheet['\"][^>]*>",
-            "",
-            html,
-            flags=re.IGNORECASE,
-        )
-
-    css = "\n".join(css_blocks)
-    rules = {}
-    for selector, props in re.findall(r"([^{}]+)\{([^{}]+)\}", css):
-        rules[selector.strip()] = props.strip().rstrip(";")
-
-    if "body" in rules:
-        body_props = rules["body"]
-        html = re.sub(
-            r"<body([^>]*)>",
-            lambda m: f"<body{m.group(1)} style=\"{body_props}\">",
-            html,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-
-    for selector, props in rules.items():
-        if not selector.startswith("."):
-            continue
-        cls = selector[1:]
-        pattern = re.compile(
-            rf'(<[^>]*class=\"[^\"]*\\b{cls}\\b[^\"]*\"[^>]*>)',
-            re.IGNORECASE,
-        )
-
-        def repl(match: re.Match) -> str:
-            tag = match.group(1)
-            if 'style="' in tag:
-                return re.sub(
-                    r'style=\"([^\"]*)\"',
-                    lambda s: f'style=\"{s.group(1)} {props}\"',
-                    tag,
-                )
-            return tag[:-1] + f' style="{props}">'
-
-        html = pattern.sub(repl, html)
-
-    body_match = re.search(r"<body[^>]*>(.*)</body>", html, re.DOTALL | re.IGNORECASE)
-    return body_match.group(1) if body_match else html
+    base_url = str(base_path.resolve()) if base_path else None
+    inlined = transform(html, base_url=base_url)
+    body_match = re.search(r"<body[^>]*>(.*)</body>", inlined, re.DOTALL | re.IGNORECASE)
+    return body_match.group(1) if body_match else inlined
 
 
 DB_KEY_HEX = "3e3d116a3066b05ccb893a2abefd93a6c6700ff4dbe25e17137edcd7ac7e7ef9"
