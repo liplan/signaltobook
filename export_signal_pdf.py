@@ -843,7 +843,6 @@ def export_chat(
     pdf.set_font("DejaVuSans", size=12)
 
     missing_attachments: List[str] = []
-    tmp_files: List[str] = []
     messages: List[dict] = []
 
     for date_ms, body, attachment_path, mime, enc_key, sender_flag in rows:
@@ -912,7 +911,6 @@ def export_chat(
             dest = images_dir / Path(resolved_path).name
             try:
                 shutil.copy(resolved_path, dest)
-                tmp_files.append(str(dest))
                 logger.info("Copied %s to %s", resolved_path, dest)
                 resolved_path = str(dest)
             except OSError as exc:
@@ -969,18 +967,6 @@ def export_chat(
     pdf.write_html(html)
     pdf.output(output_pdf)
     pdf.cleanup()
-
-    for fp in tmp_files:
-        try:
-            os.remove(fp)
-        except OSError:
-            pass
-
-    images_dir = Path("images")
-    try:
-        images_dir.rmdir()
-    except OSError:
-        pass
 
     if missing_attachments:
         print("⚠️ Some image attachments could not be embedded:")
