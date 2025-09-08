@@ -326,6 +326,8 @@ def resolve_attachment_path(
     if not raw_path:
         return None
 
+    raw_path = raw_path.strip()
+    logger.info("Resolving attachment path %s", raw_path)
     path = Path(raw_path)
     candidates = [path, Path(path.name)]
 
@@ -862,21 +864,46 @@ def export_chat(
             else None
         )
 
+        if attachment_path:
+            logger.info("Processing attachment %s", attachment_path)
+        if resolved_path:
+            logger.info("Resolved attachment to %s", resolved_path)
+            if os.path.exists(resolved_path):
+                logger.info("File %s exists", resolved_path)
+                if os.access(resolved_path, os.R_OK):
+                    logger.info("File %s is readable", resolved_path)
+                else:
+                    logger.warning("File %s is not readable", resolved_path)
+            else:
+                logger.warning("Resolved path %s does not exist", resolved_path)
+                resolved_path = None
+        elif attachment_path:
+            logger.warning("Attachment %s could not be resolved", attachment_path)
+
         file_key: Optional[bytes] = None
         if enc_key:
+            logger.info("Attachment %s appears encrypted", attachment_path)
             try:
                 if isinstance(enc_key, (bytes, bytearray, memoryview)):
                     enc_bytes = bytes(enc_key)
                 else:
                     enc_bytes = bytes.fromhex(str(enc_key))
                 file_key = _decrypt_file_key(enc_bytes, master_key)
-            except Exception:
-                pass
+                logger.info("Decrypted file key for %s", attachment_path)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to derive file key for %s: %s", attachment_path, exc
+                )
+        else:
+            logger.info("Attachment %s is not encrypted", attachment_path)
+
         if resolved_path and file_key:
             decrypted = _decrypt_attachment(resolved_path, file_key)
             if decrypted:
+                logger.info("Decryption succeeded for %s", resolved_path)
                 resolved_path = decrypted
             else:
+                logger.warning("Decryption failed for %s", resolved_path)
                 missing_attachments.append(f"{attachment_path} (decrypt error)")
                 resolved_path = None
         elif resolved_path:
@@ -886,8 +913,12 @@ def export_chat(
             try:
                 shutil.copy(resolved_path, dest)
                 tmp_files.append(str(dest))
+                logger.info("Copied %s to %s", resolved_path, dest)
                 resolved_path = str(dest)
-            except OSError:
+            except OSError as exc:
+                logger.warning(
+                    "Failed to copy %s to %s: %s", resolved_path, dest, exc
+                )
                 missing_attachments.append(f"{attachment_path} (copy error)")
                 resolved_path = None
 
