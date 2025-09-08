@@ -6,6 +6,11 @@ from io import BytesIO
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _handler = logging.FileHandler("signal_attachment_decrypt.log", encoding="utf-8")
+    _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    logger.addHandler(_handler)
+logger.setLevel(logging.DEBUG)
 
 # ---------------------------
 # Basis-Funktionalität
