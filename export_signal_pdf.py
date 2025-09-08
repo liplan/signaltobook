@@ -45,6 +45,11 @@ try:  # attachment decryption
 except Exception:  # pragma: no cover - optional dependency
     AES = None  # type: ignore
 
+try:  # attachment file decryption helper
+    from signal_attachment_decrypt import decrypt_attachment_file  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    decrypt_attachment_file = None  # type: ignore
+
 try:  # optional HEIF support
     import pillow_heif  # type: ignore
 
@@ -440,9 +445,10 @@ def _decrypt_attachment(path: str, file_key: bytes) -> Optional[str]:
     """
 
     logger.info("Starting decryption of attachment %s", path)
+    if decrypt_attachment_file is None:
+        logger.warning("signal_attachment_decrypt not available")
+        return None
     try:
-        from signal_attachment_decrypt import decrypt_attachment_file
-
         tmp_path = decrypt_attachment_file(file_key, path)
     except Exception:
         logger.warning("Failed to decrypt attachment %s", path)
