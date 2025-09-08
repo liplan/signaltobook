@@ -300,6 +300,45 @@ def resolve_attachment_path(
     return None
 
 
+def detect_mime_type(path: str) -> Optional[str]:
+    """Best-effort MIME type detection for ``path``.
+
+    The function tries multiple strategies to infer the media type so that
+    attachments lacking file extensions can still be classified. Only a small
+    subset of formats is recognized which is sufficient to distinguish images
+    from common audio files. ``None`` is returned when detection fails."""
+
+    import mimetypes
+    import imghdr
+
+    mime, _ = mimetypes.guess_type(path)
+    if mime:
+        return mime
+
+    try:
+        img = imghdr.what(path)
+        if img:
+            return f"image/{img}"
+    except Exception:
+        pass
+
+    try:
+        with open(path, "rb") as fh:
+            header = fh.read(12)
+        if header.startswith(b"RIFF") and header[8:12] == b"WAVE":
+            return "audio/wav"
+        if header.startswith(b"ID3") or header[:2] == b"\xff\xfb":
+            return "audio/mpeg"
+        if header.startswith(b"OggS"):
+            return "audio/ogg"
+        if header.startswith(b"fLaC"):
+            return "audio/flac"
+    except OSError:
+        return None
+
+    return None
+
+
 def is_outgoing(flag: Any) -> bool:
     """Return ``True`` if ``flag`` indicates an outgoing message.
 
@@ -701,6 +740,9 @@ def export_chat(
             if attachment_path
             else None
         )
+
+        if resolved_path and not mime:
+            mime = detect_mime_type(resolved_path)
 
         if resolved_path and mime and mime.startswith("text"):
             try:
