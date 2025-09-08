@@ -5,3 +5,4 @@ pysqlcipher3
 Pillow>=9.0
 premailer
 wand
+pycryptodome

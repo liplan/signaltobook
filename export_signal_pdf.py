@@ -44,6 +44,13 @@ from markupsafe import Markup
 from PIL import Image
 from premailer import transform
 
+try:  # attachment decryption
+    from Crypto.Cipher import AES  # type: ignore
+    from Crypto.Util.Padding import unpad  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    AES = None  # type: ignore
+    unpad = None  # type: ignore
+
 try:  # optional HEIF support
     import pillow_heif  # type: ignore
 
@@ -376,6 +383,43 @@ def detect_mime_type(path: str) -> Optional[str]:
     return result
 
 
+def _decrypt_file_key(enc_key: bytes, master_key: bytes) -> bytes:
+    """Return decrypted attachment key using AES-256-CBC."""
+
+    iv = enc_key[:16]
+    cipher = AES.new(master_key, AES.MODE_CBC, iv)
+    return cipher.decrypt(enc_key[16:])
+
+
+def _decrypt_attachment(path: str, file_key: bytes) -> Optional[str]:
+    """Decrypt attachment at ``path`` using ``file_key``.
+
+    A temporary file with the decrypted content is returned or ``None`` when
+    decryption fails. Attachments are expected to have a 16 byte IV prefix.
+    """
+
+    if AES is None or unpad is None:
+        logger.warning("PyCryptodome is required for attachment decryption")
+        return None
+    try:
+        with open(path, "rb") as fh:
+            iv = fh.read(16)
+            data = fh.read()
+        cipher = AES.new(file_key, AES.MODE_CBC, iv)
+        dec = cipher.decrypt(data)
+        try:
+            dec = unpad(dec, AES.block_size)
+        except ValueError:
+            pass
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        tmp.write(dec)
+        tmp.close()
+        return tmp.name
+    except Exception:
+        logger.warning("Failed to decrypt attachment %s", path)
+        return None
+
+
 def is_outgoing(flag: Any) -> bool:
     """Return ``True`` if ``flag`` indicates an outgoing message.
 
@@ -617,6 +661,7 @@ def detect_attachment_schema(cur: Any, msg_id_col: str) -> Optional[dict]:
 
     path_cols = ["filePath", "fileName", "path", "filename"]
     mime_cols = ["contentType", "mimetype", "mime_type", "type"]
+    key_cols = ["key", "fileKey", "file_key"]
     fk_cols = [
         "message_id",
         "messageId",
@@ -635,11 +680,13 @@ def detect_attachment_schema(cur: Any, msg_id_col: str) -> Optional[dict]:
         paths = [c for c in path_cols if c in cols]
         if fk_col and paths:
             mime_col = next((c for c in mime_cols if c in cols), None)
+            key_col = next((c for c in key_cols if c in cols), None)
             return {
                 "table": table,
                 "fk": fk_col,
                 "paths": paths,
                 "mime": mime_col,
+                "key": key_col,
             }
 
     return None
@@ -704,14 +751,14 @@ def export_chat(
             f"a.{attachment['paths'][0]}" if len(attachment["paths"]) == 1
             else "COALESCE(" + ", ".join(f"a.{p}" for p in attachment["paths"]) + ")"
         )
-        mime_expr = (
-            f"a.{attachment['mime']}" if attachment["mime"] else "NULL"
-        )
+        mime_expr = f"a.{attachment['mime']}" if attachment["mime"] else "NULL"
+        key_expr = f"a.{attachment['key']}" if attachment.get("key") else "NULL"
         query = f"""
         SELECT m.{schema['date']} AS date,
                m.{schema['body']} AS body,
                {path_expr} AS attachment_path,
                {mime_expr} AS contentType,
+               {key_expr} AS fileKey,
                {direction_expr}
         FROM {schema['table']} AS m
         LEFT JOIN {attachment['table']} AS a
@@ -729,6 +776,7 @@ def export_chat(
                m.{schema['body']} AS body,
                NULL AS attachment_path,
                NULL AS contentType,
+               NULL AS fileKey,
                {direction_expr}
         FROM {schema['table']} AS m
         WHERE m.{schema['conv']} = ? AND m.{schema['date']} BETWEEN ? AND ?
@@ -743,6 +791,7 @@ def export_chat(
             f"the conversation id '{conversation_id}' exists. Original error: {exc}"
         )
     rows = cur.fetchall()
+    master_key = bytes.fromhex(key_hex)
 
     if not rows:
         conn.close()
@@ -765,9 +814,10 @@ def export_chat(
     pdf.set_font("DejaVuSans", size=12)
 
     missing_attachments: List[str] = []
+    tmp_files: List[str] = []
     messages: List[dict] = []
 
-    for date_ms, body, attachment_path, mime, sender_flag in rows:
+    for date_ms, body, attachment_path, mime, enc_key, sender_flag in rows:
         date_str = datetime.fromtimestamp(date_ms / 1000).strftime(
             "%Y-%m-%d %H:%M"
         )
@@ -777,6 +827,25 @@ def export_chat(
             if attachment_path
             else None
         )
+
+        file_key: Optional[bytes] = None
+        if enc_key:
+            try:
+                if isinstance(enc_key, (bytes, bytearray, memoryview)):
+                    enc_bytes = bytes(enc_key)
+                else:
+                    enc_bytes = bytes.fromhex(str(enc_key))
+                file_key = _decrypt_file_key(enc_bytes, master_key)
+            except Exception:
+                pass
+        if resolved_path and file_key:
+            decrypted = _decrypt_attachment(resolved_path, file_key)
+            if decrypted:
+                tmp_files.append(decrypted)
+                resolved_path = decrypted
+            else:
+                missing_attachments.append(f"{attachment_path} (decrypt error)")
+                resolved_path = None
 
         if resolved_path and not mime:
             mime = detect_mime_type(resolved_path)
@@ -825,6 +894,12 @@ def export_chat(
     pdf.write_html(html)
     pdf.output(output_pdf)
     pdf.cleanup()
+
+    for fp in tmp_files:
+        try:
+            os.remove(fp)
+        except OSError:
+            pass
 
     if missing_attachments:
         print("⚠️ Some image attachments could not be embedded:")
