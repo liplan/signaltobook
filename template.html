@@ -10,31 +10,25 @@ body {
 }
 
 .message { 
-  margin-bottom: 12px; 
+  margin-bottom: 14px; 
   display: block;
 }
 
 .date { 
-  font-size: 6px; 
-  color: #888888; 
+  font-size: 8px;       /* kleiner als Haupttext */
+  color: #888888;       /* grau */
+  display: block;
   margin-bottom: 2px;
-  display: block;
-}
-
-.meta { 
-  color: #555555; 
-  font-size: 9px; 
-  display: block;
 }
 
 .sender { 
-  font-weight: bold; 
+  font-weight: bold;    /* fett */
+  margin-left: 4px;
 }
 
 .text { 
   margin-top: 4px; 
-  margin-left: 0; 
-  white-space: pre-wrap; /* Zeilenumbrüche und Absätze erhalten */
+  white-space: pre-wrap; /* Zeilenumbrüche/Absätze erhalten */
   display: block;
 }
 </style>
@@ -42,10 +36,9 @@ body {
 <body>
 <h1>{{ conversation_label }}</h1>
 {% for msg in messages %}
-<div class="message">
-  <div class="meta date">
-    {{ msg.date }} 
-    <span class="sender">{{ msg.sender }}</span>
+<p class="message">
+  <div class="date">
+    {{ msg.date }} <span class="sender">{{ msg.sender }}</span>
   </div>
   <div class="text">{{ msg.text }}</div>
   {% if msg.attachment and msg.mime and msg.mime.startswith('image') %}
@@ -53,8 +46,7 @@ body {
   {% elif msg.attachment %}
     <div>[Attachment: {{ msg.attachment_name }}]</div>
   {% endif %}
-</div>
-<br><br>
+</p>
 {% endfor %}
 </body>
 </html>
