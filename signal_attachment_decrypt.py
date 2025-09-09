@@ -86,6 +86,30 @@ def _try_decrypt_cbc(key: bytes, blob: bytes) -> Optional[bytes]:
         logger.debug("_try_decrypt_cbc: failed with %s", e)
         return None
 
+
+def decrypt_file_key(enc_key: bytes, master_key: bytes) -> bytes:
+    """Return decrypted attachment key.
+
+    Signal stores attachment keys encrypted with the conversation's master
+    key.  Newer versions use AES-256-GCM while older databases relied on
+    AES-256-CBC.  This helper attempts GCM first and falls back to the legacy
+    CBC method for backwards compatibility.
+    """
+
+    # Try the current AES-GCM based wrapping.  If decryption or validation
+    # fails we fall back to the historic CBC variant below.
+    try:
+        nonce = enc_key[:12]
+        tag = enc_key[-16:]
+        cipher_text = enc_key[12:-16]
+        cipher = AES.new(master_key, AES.MODE_GCM, nonce=nonce)
+        plain = cipher.decrypt_and_verify(cipher_text, tag)
+        return plain[:32]
+    except Exception:
+        iv = enc_key[:16]
+        cipher = AES.new(master_key, AES.MODE_CBC, iv)
+        return cipher.decrypt(enc_key[16:])
+
 def decrypt_attachment_bytes(key: bytes, blob: bytes) -> Tuple[bytes, Dict[str, str]]:
     """Decrypt an attachment blob using various AES modes.
 
@@ -144,6 +168,20 @@ def decrypt_attachment_file(key: bytes, in_path: str, out_path: Optional[str] = 
     with open(out, "wb") as w:
         w.write(pt)
     return out
+
+
+def decrypt_attachment_with_enc_key(
+    enc_key: bytes, master_key: bytes, in_path: str, out_path: Optional[str] = None
+) -> str:
+    """Decrypt attachment ``in_path`` using ``enc_key`` and ``master_key``.
+
+    This is a convenience wrapper that first derives the raw file key from the
+    encrypted key stored in the database and then delegates to
+    :func:`decrypt_attachment_file`.
+    """
+
+    file_key = decrypt_file_key(enc_key, master_key)
+    return decrypt_attachment_file(file_key, in_path, out_path)
 
 # ---------------------------
 # Carving Utilities (Fallback)
