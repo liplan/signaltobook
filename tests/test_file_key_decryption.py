@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from export_signal_pdf import _decrypt_file_key
+from signal_attachment_decrypt import decrypt_file_key
 
 try:
     from Crypto.Cipher import AES
@@ -20,5 +20,5 @@ def test_decrypt_file_key_gcm():
     cipher = AES.new(master_key, AES.MODE_GCM, nonce=nonce)
     ct, tag = cipher.encrypt_and_digest(plain)
     enc_key = nonce + ct + tag
-    derived = _decrypt_file_key(enc_key, master_key)
+    derived = decrypt_file_key(enc_key, master_key)
     assert derived == file_key

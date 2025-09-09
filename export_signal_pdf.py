@@ -40,15 +40,12 @@ from markupsafe import Markup
 from PIL import Image
 from premailer import transform
 
-try:  # attachment decryption
-    from Crypto.Cipher import AES  # type: ignore
+try:  # attachment decryption helper
+    from signal_attachment_decrypt import (
+        decrypt_attachment_with_enc_key,
+    )  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
-    AES = None  # type: ignore
-
-try:  # attachment file decryption helper
-    from signal_attachment_decrypt import decrypt_attachment_file  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    decrypt_attachment_file = None  # type: ignore
+    decrypt_attachment_with_enc_key = None  # type: ignore
 
 try:  # optional HEIF support
     import pillow_heif  # type: ignore
@@ -428,33 +425,8 @@ def decode_image(path: str) -> Optional[str]:
         return None
 
 
-def _decrypt_file_key(enc_key: bytes, master_key: bytes) -> bytes:
-    """Return decrypted attachment key.
-
-    Newer Signal databases encode the file key using AES-256-GCM where the
-    first 12 bytes represent the nonce and the last 16 bytes the tag.  Older
-    versions used AES-256-CBC with a 16 byte IV prefix.  This helper tries the
-    modern GCM scheme first and falls back to the legacy CBC method for
-    compatibility with exported databases from older Signal versions.
-    """
-
-    # Prefer the current AES-GCM based wrapping.  If decryption or validation
-    # fails we fall back to the historic CBC variant below.
-    try:
-        nonce = enc_key[:12]
-        tag = enc_key[-16:]
-        cipher_text = enc_key[12:-16]
-        cipher = AES.new(master_key, AES.MODE_GCM, nonce=nonce)
-        plain = cipher.decrypt_and_verify(cipher_text, tag)
-        return plain[:32]
-    except Exception:
-        iv = enc_key[:16]
-        cipher = AES.new(master_key, AES.MODE_CBC, iv)
-        return cipher.decrypt(enc_key[16:])
-
-
-def _decrypt_attachment(path: str, file_key: bytes) -> Optional[str]:
-    """Decrypt attachment at ``path`` using ``file_key``.
+def _decrypt_attachment(path: str, enc_key: bytes, master_key: bytes) -> Optional[str]:
+    """Decrypt attachment at ``path`` using ``enc_key`` and ``master_key``.
 
     A temporary file with the decrypted content is returned or ``None`` when
     decryption fails. The function relies on :mod:`signal_attachment_decrypt`
@@ -462,11 +434,11 @@ def _decrypt_attachment(path: str, file_key: bytes) -> Optional[str]:
     """
 
     logger.info("Starting decryption of attachment %s", path)
-    if decrypt_attachment_file is None:
+    if decrypt_attachment_with_enc_key is None:
         logger.warning("signal_attachment_decrypt not available")
         return None
     try:
-        tmp_path = decrypt_attachment_file(file_key, path)
+        tmp_path = decrypt_attachment_with_enc_key(enc_key, master_key, path)
     except Exception:
         logger.warning("Failed to decrypt attachment %s", path)
         return None
@@ -931,7 +903,7 @@ def export_chat(
         elif attachment_path:
             logger.warning("Attachment %s could not be resolved", attachment_path)
 
-        file_key: Optional[bytes] = None
+        enc_bytes: Optional[bytes] = None
         if enc_key:
             logger.info("Attachment %s appears encrypted", attachment_path)
             try:
@@ -939,17 +911,15 @@ def export_chat(
                     enc_bytes = bytes(enc_key)
                 else:
                     enc_bytes = bytes.fromhex(str(enc_key))
-                file_key = _decrypt_file_key(enc_bytes, master_key)
-                logger.info("Decrypted file key for %s", attachment_path)
             except Exception as exc:
                 logger.warning(
-                    "Failed to derive file key for %s: %s", attachment_path, exc
+                    "Failed to parse encrypted key for %s: %s", attachment_path, exc
                 )
         else:
             logger.info("Attachment %s is not encrypted", attachment_path)
 
-        if resolved_path and decrypt_attachment_file:
-            decrypted = _decrypt_attachment(resolved_path, file_key)
+        if resolved_path and enc_bytes and decrypt_attachment_with_enc_key:
+            decrypted = _decrypt_attachment(resolved_path, enc_bytes, master_key)
             if decrypted:
                 logger.info("Decryption succeeded for %s", resolved_path)
                 resolved_path = decrypted
