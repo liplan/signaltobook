@@ -3,7 +3,7 @@ import os
 import pytest
 from PIL import Image
 
-from export_signal_pdf import _decrypt_attachment
+from signal_attachment_decrypt import decrypt_attachment_file
 
 try:
     from Crypto.Cipher import AES
@@ -26,7 +26,6 @@ def test_decrypt_attachment_gcm(tmp_path, monkeypatch):
     enc_path.write_bytes(nonce + ct + tag)
 
     monkeypatch.chdir(tmp_path)
-    out = _decrypt_attachment(str(enc_path), key)
-    assert out is not None
+    out = decrypt_attachment_file(key, str(enc_path))
     with Image.open(out) as dec:
         assert dec.size == (1, 1)
